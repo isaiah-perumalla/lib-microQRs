@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use crate::bits::{BitIter, BitSquare, Square};
 
 pub fn version_to_size(v: u8) -> u8 {
@@ -15,7 +14,7 @@ impl ErrorLevel {
         let l_mask_pattern:[u32;8] = [0b111011111000100, 0b111001011110011, 0b111110110101010, 0b111100010011101,
                                       0b110011000101111, 0b110001100011000, 0b110110001000001, 0b110100101110110 ];
         match (*self, mask) {
-            (L, m) => l_mask_pattern[m as usize],
+            (ErrorLevel::L, m) => l_mask_pattern[m as usize],
             _ => 0
         }
     }
@@ -35,18 +34,6 @@ pub struct QrCode {
 
 
 impl QrCode {
-    //for testing
-    fn with_size(size:u8) -> QrCode {
-        let bit_sq = BitSquare::new(size);
-        let reserved = BitSquare::new(size);
-        let qr = QrCode {
-            data: bit_sq,
-            reserved_bits: reserved,
-            version: 0,
-            error_level: ErrorLevel::L,
-        };
-        return qr;
-    }
 
     pub fn new(version: u8, error_level: ErrorLevel) -> QrCode {
         let size = version_to_size(version);
@@ -146,7 +133,7 @@ impl QrCode {
 
         let mut bit_iter = BitIter::new(code_words);
         let zigzag_it = ZigzagIter::new(self.data.size);
-        let mut bit_count = 0u32;
+        let mut bit_count:usize = 0;
         for (x,y) in zigzag_it {
             if self.is_data_module((x,y)) {
                 if let Some(bit) = bit_iter.next() {
@@ -158,7 +145,7 @@ impl QrCode {
                 }
             }
         }
-
+        assert_eq!(bit_count, code_words.len()*8);
     }
 
     fn expected_byte_count(&self) -> usize {

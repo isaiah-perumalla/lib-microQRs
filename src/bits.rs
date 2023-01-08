@@ -129,9 +129,6 @@ fn test_bit_square() {
     }
 }
 
-fn bit_msb_iter(bytes: &[u8]) -> BitIter {
-    return BitIter::new(bytes);
-}
 
 pub struct BitIter<'a> {
     bytes: &'a [u8],
