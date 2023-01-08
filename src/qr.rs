@@ -1,4 +1,36 @@
-use crate::bits::{BitIter, BitSquare, Square};
+use std::collections::HashSet;
+use crate::bits::{MsbBitIter, BitSquare, Square};
+use crate::qr::encode::{add_padding, encode_byte_segment};
+
+#[derive(Clone, Copy, Debug)]
+struct DataCapacity {
+    ec_words_per_blk: u8,
+    grp_1_blks: u8,
+    words_per_grp_1: u8,
+    grp_2_blks: u8,
+    words_per_grp_2: u8
+}
+
+impl DataCapacity {
+
+    fn total_data_words(&self) -> usize {
+        let words_grp_1 = self.words_per_grp_1 as u16 * (self.grp_1_blks as u16);
+        let words_grp_2 = self.words_per_grp_2 as u16 * (self.grp_2_blks as u16);
+        (words_grp_1 + words_grp_2) as usize
+    }
+ }
+
+const DATA_CAPACITY_L: [DataCapacity;8] = [
+    DataCapacity{ec_words_per_blk: 0, grp_1_blks : 0, words_per_grp_1 : 0, grp_2_blks : 0, words_per_grp_2 : 0},
+    DataCapacity{ec_words_per_blk: 7, grp_1_blks : 1, words_per_grp_1 : 19, grp_2_blks : 0, words_per_grp_2 : 0}, //v1
+    DataCapacity{ec_words_per_blk: 10, grp_1_blks : 1, words_per_grp_1 : 34, grp_2_blks : 0, words_per_grp_2 : 0},
+    DataCapacity{ec_words_per_blk: 15, grp_1_blks : 1, words_per_grp_1 : 55, grp_2_blks : 0, words_per_grp_2 : 0},
+    DataCapacity{ec_words_per_blk: 20, grp_1_blks : 1, words_per_grp_1 : 80, grp_2_blks : 0, words_per_grp_2 : 0}, //v4
+    DataCapacity{ec_words_per_blk: 26, grp_1_blks : 1, words_per_grp_1 : 108, grp_2_blks : 0, words_per_grp_2 : 0}, //v5
+    DataCapacity{ec_words_per_blk: 18, grp_1_blks : 2, words_per_grp_1 : 68, grp_2_blks : 0, words_per_grp_2 : 0}, //v6
+    DataCapacity{ec_words_per_blk: 20, grp_1_blks : 2, words_per_grp_1 : 78, grp_2_blks : 0, words_per_grp_2 : 0}, //v7
+
+    ];
 
 pub fn version_to_size(v: u8) -> u8 {
     return 4*v + 17;
@@ -9,6 +41,9 @@ pub enum ErrorLevel {
     L, M, Q, H
 }
 
+
+
+
 impl ErrorLevel {
     pub fn format_bits(&self, mask: u8) -> u32  {
         let l_mask_pattern:[u32;8] = [0b111011111000100, 0b111001011110011, 0b111110110101010, 0b111100010011101,
@@ -16,6 +51,28 @@ impl ErrorLevel {
         match (*self, mask) {
             (ErrorLevel::L, m) => l_mask_pattern[m as usize],
             _ => 0
+        }
+    }
+
+    pub fn add_error_codes(&self, version: u8, msg_buffer: &mut [u8]) -> usize {
+        match *self {
+            ErrorLevel::L => {
+                let capacity_info = DATA_CAPACITY_L[version as usize];
+                let data_size = capacity_info.total_data_words();
+                let ecc = [0xCC, 0x4A, 0x45, 0xBF, 0xB8, 0xB8, 0xAA];
+                for (i,byte) in ecc.iter().enumerate() {
+                    msg_buffer[data_size + i] = *byte;
+                }
+                (data_size + ecc.len() ) as usize
+            },
+            _ => todo!()
+        }
+    }
+
+    pub fn data_code_words(&self, version: u8) -> usize {
+        match self {
+            ErrorLevel::L => DATA_CAPACITY_L[version as usize].total_data_words() ,
+            _ => todo!()
         }
     }
 }
@@ -29,7 +86,6 @@ pub struct QrCode {
     version: u8,
     error_level: ErrorLevel
 }
-
 
 
 
@@ -58,11 +114,23 @@ impl QrCode {
 
     }
 
+    pub fn encode_data(&mut self, data: &str) {
+        let mut out_bytes = [0u8;128];
+        let size = encode_byte_segment(data,
+                                       &mut out_bytes).unwrap();
+        let version = self.version;
+        let code_words_size = ErrorLevel::L.data_code_words(version);
+        let padding = code_words_size - size;
+        add_padding(&mut out_bytes[size .. (size + padding)]);
+        let size = ErrorLevel::L.add_error_codes(version, &mut out_bytes);
+        self.set_code_words(&out_bytes[0..size]);
+        self.apply_mask(0);
+    }
     pub fn data_sq(&self) -> &BitSquare {
         return &self.data;
     }
 
-    pub fn apply_mask(&mut self, mask_pattern: u8) {
+    fn apply_mask(&mut self, mask_pattern: u8) {
         debug_assert!(mask_pattern < 8, "invalid mask patter {}", mask_pattern);
         let mask_fn = MASK_FN[mask_pattern as usize];
         let size = self.data.size;
@@ -126,23 +194,24 @@ impl QrCode {
         self.set_function_module(x,y, true);
     }
 
-    pub fn set_code_words(&mut self, code_words: &[u8]) {
+    pub (crate) fn set_code_words(&mut self, code_words: &[u8]) {
         debug_assert!(code_words.len() == self.expected_byte_count(),
                       "code_words len for version {}, {} but was {}",
                       self.version, self.expected_byte_count(), code_words.len());
 
-        let mut bit_iter = BitIter::new(code_words);
+        let mut bit_iter = MsbBitIter::new(code_words);
         let zigzag_it = ZigzagIter::new(self.data.size);
         let mut bit_count:usize = 0;
         for (x,y) in zigzag_it {
-            if self.is_data_module((x,y)) {
-                if let Some(bit) = bit_iter.next() {
-                    self.data.set_value(x,y, bit);
-                    bit_count += 1;
-                }
-                else {
-                    break;
-                }
+            if !self.is_data_module((x, y)) {
+                continue;
+            }
+            if let Some(bit) = bit_iter.next() {
+                self.data.set_value(x,y, bit);
+                bit_count += 1;
+            }
+            else {
+                break;
             }
         }
         assert_eq!(bit_count, code_words.len()*8);
@@ -341,6 +410,69 @@ fn finding_pattern(sq: &mut BitSquare, top_left: (u8, u8), changes: &mut BitSqua
     changes.set_square(Square::new(1, (x + 3, y + 3)), true);
 }
 
+
+pub mod encode {
+    use crate::bits::BigEndianBitWriter;
+
+
+    #[derive(Debug)]
+    pub enum EnumEncodingErr {
+        NotAscii,
+        NotAlphaNumeric,
+        DataTooLong
+    }
+
+    // encode string to data code words
+//include mode type and padding bits
+    pub fn encode_byte_segment(data: &str, out: &mut [u8]) -> Result<usize, EnumEncodingErr> {
+        let mut bit_writer = BigEndianBitWriter::new(out);
+        let char_count = data.chars().count();
+
+        let segment_mode = 0b0100; //bytes
+        bit_writer.append_bits(segment_mode, 4);
+        bit_writer.append_bits(char_count as u8, 8);
+        for ch in data.chars() {
+            let byte = ch as u8;
+            bit_writer.append_bits(byte, 8);
+        }
+        bit_writer.append_bits(0b0000, 4); // terminator bits
+
+        let pad_bits = bit_writer.bits_written() % 8;
+        bit_writer.append_bits(0, pad_bits as u8);
+
+        let bytes = bit_writer.bits_written() >> 3; //bits/8
+        debug_assert!(bytes == 2 + char_count);
+        return Ok(bytes);
+    }
+
+
+
+    pub fn add_padding(bytes: &mut [u8]) {
+        let pad_bytes = [0xEC, 0x11];
+        for i in 0..bytes.len() {
+            let b = pad_bytes[(i & 1)]; //cycle between odd and even
+            bytes[i] = b;
+        }
+    }
+}
+
+
+#[test]
+pub fn test_encode_to_bytes() {
+    let mut out_bytess = [0u8; 64];
+    let res = encode_byte_segment("isaiah", &mut out_bytess);
+    assert_eq!(res.unwrap(), 8);
+    let expected_bytes = [0x40, 0x66, 0x97, 0x36, 0x16, 0x96, 0x16, 0x80];
+    assert_eq!(&expected_bytes, &out_bytess[0..expected_bytes.len()]);
+
+    let res = encode_byte_segment("isaiah-perumalla", &mut out_bytess);
+    assert_eq!(res.unwrap(), 18);
+    let expected_bytes = [0x41, 0x06, 0x97, 0x36, 0x16, 0x96, 0x16, 0x82, 0xD7,
+        0x06, 0x57, 0x27, 0x56, 0xD6, 0x16, 0xC6, 0xC6, 0x10];
+    assert_eq!(&expected_bytes, &out_bytess[0..expected_bytes.len()]);
+}
+
+
 #[test]
 fn test_zigzag_iter() {
     let qr_4 = ZigzagIter::new(4);
@@ -404,3 +536,24 @@ fn test_qr_data_module_iter() {
     println!("len={},{:?}", data_modules.len(), data_modules);
 }
 
+
+#[test]
+fn test_basic_qr() {
+    let mut qr = QrCode::new(1, ErrorLevel::L);
+    qr.encode_data("isaiah-perumalla1");
+    //remove mask
+    qr.apply_mask(0);
+    let mut bit_string = String::new();
+    for (x,y) in ZigzagIter::new(qr.data.size).filter(|p| qr.is_data_module(*p)) {
+        let bit = qr.data.is_set(x,y);
+        if bit {
+            bit_string.push('1');
+        }
+        else {
+            bit_string.push('0');
+        }
+    }
+    let expected_unmasked_str = "0100000100010110100101110011011000010110100101100001011010000010110101110000011001010111001001110101011011010110000101101100011011000110000100110001000011001100010010100100010110111111101110001011100010101010";
+    assert_eq!(expected_unmasked_str.len(), bit_string.len());
+    assert_eq!(expected_unmasked_str, bit_string);
+}
