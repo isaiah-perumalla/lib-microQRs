@@ -98,9 +98,6 @@ impl QrCode {
     }
 
 
-    fn module_iter(&self) -> ModuleIter {
-        return ModuleIter::new(self);
-    }
 
     fn set_format(&mut self) {
         let bits = self.error_level.format_bits(0);
@@ -131,12 +128,10 @@ impl QrCode {
     }
 
     fn set_function_module(&mut self, x:u8,y:u8, is_set: bool) {
-        if is_set {
-            self.data.set(x, y);
-        } else {
-            self.data.clear(x, y);
-        }
-        self.reserved_bits.set(x, y);
+
+        self.data.set_value(x, y, is_set);
+
+        self.reserved_bits.set_value(x, y, true);
     }
 
     fn set_dark_module(&mut self) {
@@ -149,21 +144,27 @@ impl QrCode {
                       "code_words len for version {}, {} but was {}",
                       self.version, self.expected_byte_count(), code_words.len());
 
-        let bit_iter = BitIter::new(code_words);
-        let positions:Vec<(u8,u8)> = self.module_iter().collect();
-        for ((x,y), set) in positions.iter().copied().zip(bit_iter) {
-            if set {
-                self.data.set(x, y);
-            }
-            else {
-                self.data.clear(x,y);
+        let mut bit_iter = BitIter::new(code_words);
+        let zigzag_it = ZigzagIter::new(self.data.size);
+        let mut bit_count = 0u32;
+        for (x,y) in zigzag_it {
+            if self.is_data_module((x,y)) {
+                if let Some(bit) = bit_iter.next() {
+                    self.data.set_value(x,y, bit);
+                    bit_count += 1;
+                }
+                else {
+                    break;
+                }
             }
         }
+
     }
 
     fn expected_byte_count(&self) -> usize {
-        match self.version {
+        match self.version  {
             1 => 26,
+            2 => 44,
             _ => todo!()
         }
     }
@@ -177,8 +178,7 @@ enum Step {
 }
 
 
-pub struct ModuleIter<'a> {
-    qr_code: &'a QrCode,
+pub struct ZigzagIter {
     next_position: Option<(u8, u8)>,
     size: u8,
     traverse_up: bool //direction
@@ -186,11 +186,10 @@ pub struct ModuleIter<'a> {
 }
 
 
-impl<'a> ModuleIter<'a> {
-    fn new(qr_code: &QrCode) -> ModuleIter {
-        let size = qr_code.data.size;
-        return ModuleIter {
-            qr_code,
+impl ZigzagIter  {
+    fn new(size:u8) -> ZigzagIter {
+
+        return ZigzagIter {
             next_position: Some((size - 1, size - 1)), //bottom right corner
             size,
             traverse_up: true
@@ -208,23 +207,6 @@ impl<'a> ModuleIter<'a> {
         }
         return if self.traverse_up { Step::Up } else { Step::Down }
     }
-}
-
-impl<'a> Iterator for ModuleIter<'a> {
-    type Item = (u8, u8);
-
-    fn next(&mut self) -> Option<Self::Item> {
-
-        while let Some((x, y)) = self.next_pos() {
-            if self.qr_code.is_data_module((x, y)) {
-                return Some((x, y))
-            }
-        }
-        None
-    }
-}
-
-impl<'a> ModuleIter<'a> {
 
     fn end_position(&self) -> (u8, u8) {
         let start_x = self.size -1;
@@ -274,6 +256,15 @@ impl<'a> ModuleIter<'a> {
     }
 }
 
+impl Iterator for ZigzagIter {
+    type Item = (u8, u8);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        return self.next_pos();
+    }
+}
+
+
 
  fn set_alignment_patterns(sq: &mut BitSquare, version: u8, reserved: &mut BitSquare) {
     assert!(version <= 5, "not supported for higher versions");
@@ -289,7 +280,7 @@ impl<'a> ModuleIter<'a> {
 }
 
 
-fn alignment_square(sq: &mut BitSquare, top_left: (u8, u8), changes: &mut BitSquare) {
+fn  alignment_square(sq: &mut BitSquare, top_left: (u8, u8), changes: &mut BitSquare) {
     let (x,y) = top_left;
     sq.set_square(Square::new(1, (x, y)), true);
     sq.set_square(Square::new(3, (x-1, y-1)), false);
@@ -304,24 +295,14 @@ fn alignment_square(sq: &mut BitSquare, top_left: (u8, u8), changes: &mut BitSqu
     let size = sq.size;
     for y in 0 .. size {
         let even = (y & 1) == 0;
-        if even {
-            sq.set(6, y);
-        }
-        else {
-            sq.clear(6, y);
-        }
-        changes.set(6, y);
+        sq.set_value(6, y, even);
+        changes.set_value(6, y, true);
     }
 
     for x in 0 .. size {
         let even = (x & 1) == 0;
-        if even {
-            sq.set(x, 6);
-        }
-        else {
-            sq.clear(x, 6);
-        }
-        changes.set(x, 6);
+        sq.set_value(x, 6, even);
+        changes.set_value(x, 6, true);
     }
 }
 
@@ -374,9 +355,9 @@ fn finding_pattern(sq: &mut BitSquare, top_left: (u8, u8), changes: &mut BitSqua
 }
 
 #[test]
-fn test_qr_iter() {
-    let qr_4 = QrCode::with_size(4);
-    let steps:Vec<(u8,u8)> = qr_4.module_iter().collect();
+fn test_zigzag_iter() {
+    let qr_4 = ZigzagIter::new(4);
+    let steps:Vec<(u8,u8)> = qr_4.collect();
 
     assert_eq!(4*4, steps.len());
     assert_eq!(steps, vec![(3,3),(2,3), (3, 2), (2, 2),
@@ -384,15 +365,15 @@ fn test_qr_iter() {
                            (1, 0), (0, 0), (1, 1), (0, 1),
                            (1, 2), (0, 2), (1, 3), (0, 3)]);
 
-    let qr_5 = QrCode::with_size(5);
-    let steps_5:Vec<(u8,u8)> = qr_5.module_iter().collect();
+    let qr_5 = ZigzagIter::new(5);
+    let steps_5:Vec<(u8,u8)> = qr_5.collect();
     assert_eq!(5*5, steps_5.len());
     assert_eq!(steps_5, vec![(4, 4), (3, 4), (4, 3), (3, 3), (4, 2), (3, 2), (4, 1), (3, 1), (4, 0),
                              (3, 0), (2, 0), (1, 0), (2, 1), (1, 1), (2, 2), (1, 2), (2, 3), (1, 3),
                              (2, 4), (1, 4), (0, 4), (0, 3), (0, 2), (0, 1), (0, 0)]);
 
-    let qr_21 = QrCode::with_size(21);
-    let steps:Vec<(u8,u8)> = qr_21.module_iter().collect();
+    let qr_21 = ZigzagIter::new(21);
+    let steps:Vec<(u8,u8)> = qr_21.collect();
     assert_eq!(21*21, steps.len());
 
 }
@@ -400,8 +381,8 @@ fn test_qr_iter() {
 #[test]
 fn test_qr_data_module_iter() {
     let qr = QrCode::new(1, ErrorLevel::L);
-    let data_modules:Vec<(u8,u8)> = qr.module_iter().collect();
-    let data_modules_set:HashSet<(u8,u8)> = qr.module_iter().collect();
+    let data_modules:Vec<(u8,u8)> = ZigzagIter::new(qr.data.size).filter(|p| qr.is_data_module(*p)).collect();
+    let data_modules_set:HashSet<(u8,u8)> = data_modules.iter().copied().collect();
     assert_eq!(data_modules_set.len(), data_modules.len());
     for i in 0..8 {
         let pos = (7, i);

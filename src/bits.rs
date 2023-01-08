@@ -43,45 +43,34 @@ impl BitSquare {
 
     pub fn flip_bit(&mut self, x:u8, y:u8) {
         assert!(x < self.size && y < self.size);
-        if self.is_set(x,y) {
-            self.clear(x, y);
+        let val = self.is_set(x, y);
+        self.set_value(x,y, !val);
+    }
+
+    pub fn set_value(&mut self, x:u8, y:u8, val:bool) {
+        assert!(x < self.size && y < self.size);
+        let index = self.bit_index(x, y);
+        let slot = index/8;
+        let mask = 1 << (index % 8);
+        if val {
+            self.bit_vec[slot as usize] |= mask;
         }
         else {
-            self.set(x,y);
+            self.bit_vec[slot as usize] &= !mask;
         }
-    }
 
-    pub fn set(&mut self, x: u8, y:u8) {
-        assert!(x < self.size && y < self.size);
-        let index = self.bit_index(x, y);
-        let slot = index/8;
-        let mask = 1 << (index % 8);
-        self.bit_vec[slot as usize] |= mask;
-    }
-
-    pub fn clear(&mut self, x:u8, y:u8) {
-        assert!(x < self.size && y < self.size);
-        let index = self.bit_index(x, y);
-        let slot = index/8;
-        let mask = 1 << (index % 8);
-        self.bit_vec[slot as usize] &= !mask;
     }
 
     pub fn draw_vert(&mut self, from: (u8, u8), len: u8, is_set: bool) {
         for i in 0 .. len {
-            match is_set {
-                true => self.set(from.0, from.1 + i),
-                _ => self.clear(from.0 , from.1 + i)
-            }
+            self.set_value(from.0, from.1 + i, is_set);
+
         }
     }
 
     pub fn draw_horizontal(&mut self, from: (u8, u8), len: u8, is_set: bool) {
         for i in 0 .. len {
-            match is_set {
-                true => self.set(from.0 + i, from.1),
-                _ => self.clear(from.0 + i, from.1)
-            }
+            self.set_value(from.0 + i, from.1, is_set);
         }
     }
 
@@ -132,9 +121,9 @@ fn test_bit_square() {
     for x in 0 ..square_size {
         for y in 0..square_size {
             assert_eq!((&bit_sq).is_set(x, y), false);
-            (&mut bit_sq).set(x, y);
+            (&mut bit_sq).set_value(x, y, true);
             assert_eq!((&bit_sq).is_set(x, y), true);
-            (&mut bit_sq).clear(x, y);
+            (&mut bit_sq).set_value(x, y, false);
             assert_eq!((&bit_sq).is_set(x, y), false);
         }
     }
