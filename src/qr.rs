@@ -1,81 +1,13 @@
 use std::collections::HashSet;
-use crate::bits::{MsbBitIter, BitSquare, Square};
+use crate::bits::{BitSquare, MsbBitIter, Square};
+use crate::error_cc::ErrorLevel;
 use crate::qr::encode::{add_padding, encode_byte_segment};
 
-#[derive(Clone, Copy, Debug)]
-struct DataCapacity {
-    ec_words_per_blk: u8,
-    grp_1_blks: u8,
-    words_per_grp_1: u8,
-    grp_2_blks: u8,
-    words_per_grp_2: u8
-}
-
-impl DataCapacity {
-
-    fn total_data_words(&self) -> usize {
-        let words_grp_1 = self.words_per_grp_1 as u16 * (self.grp_1_blks as u16);
-        let words_grp_2 = self.words_per_grp_2 as u16 * (self.grp_2_blks as u16);
-        (words_grp_1 + words_grp_2) as usize
-    }
- }
-
-const DATA_CAPACITY_L: [DataCapacity;8] = [
-    DataCapacity{ec_words_per_blk: 0, grp_1_blks : 0, words_per_grp_1 : 0, grp_2_blks : 0, words_per_grp_2 : 0},
-    DataCapacity{ec_words_per_blk: 7, grp_1_blks : 1, words_per_grp_1 : 19, grp_2_blks : 0, words_per_grp_2 : 0}, //v1
-    DataCapacity{ec_words_per_blk: 10, grp_1_blks : 1, words_per_grp_1 : 34, grp_2_blks : 0, words_per_grp_2 : 0},
-    DataCapacity{ec_words_per_blk: 15, grp_1_blks : 1, words_per_grp_1 : 55, grp_2_blks : 0, words_per_grp_2 : 0},
-    DataCapacity{ec_words_per_blk: 20, grp_1_blks : 1, words_per_grp_1 : 80, grp_2_blks : 0, words_per_grp_2 : 0}, //v4
-    DataCapacity{ec_words_per_blk: 26, grp_1_blks : 1, words_per_grp_1 : 108, grp_2_blks : 0, words_per_grp_2 : 0}, //v5
-    DataCapacity{ec_words_per_blk: 18, grp_1_blks : 2, words_per_grp_1 : 68, grp_2_blks : 0, words_per_grp_2 : 0}, //v6
-    DataCapacity{ec_words_per_blk: 20, grp_1_blks : 2, words_per_grp_1 : 78, grp_2_blks : 0, words_per_grp_2 : 0}, //v7
-
-    ];
 
 pub fn version_to_size(v: u8) -> u8 {
     return 4*v + 17;
 }
 
-#[derive(Clone, Copy)]
-pub enum ErrorLevel {
-    L, M, Q, H
-}
-
-
-
-
-impl ErrorLevel {
-    pub fn format_bits(&self, mask: u8) -> u32  {
-        let l_mask_pattern:[u32;8] = [0b111011111000100, 0b111001011110011, 0b111110110101010, 0b111100010011101,
-                                      0b110011000101111, 0b110001100011000, 0b110110001000001, 0b110100101110110 ];
-        match (*self, mask) {
-            (ErrorLevel::L, m) => l_mask_pattern[m as usize],
-            _ => 0
-        }
-    }
-
-    pub fn add_error_codes(&self, version: u8, msg_buffer: &mut [u8]) -> usize {
-        match *self {
-            ErrorLevel::L => {
-                let capacity_info = DATA_CAPACITY_L[version as usize];
-                let data_size = capacity_info.total_data_words();
-                let ecc = [0xCC, 0x4A, 0x45, 0xBF, 0xB8, 0xB8, 0xAA];
-                for (i,byte) in ecc.iter().enumerate() {
-                    msg_buffer[data_size + i] = *byte;
-                }
-                (data_size + ecc.len() ) as usize
-            },
-            _ => todo!()
-        }
-    }
-
-    pub fn data_code_words(&self, version: u8) -> usize {
-        match self {
-            ErrorLevel::L => DATA_CAPACITY_L[version as usize].total_data_words() ,
-            _ => todo!()
-        }
-    }
-}
 static  MASK_FN: [fn((u8,u8)) -> bool;2]  = [
                                             |(x, y)| { 0 == (x + y) % 2 },
                                             |(x, y)| { 0 == (x + y) % 2 } ];
@@ -115,7 +47,7 @@ impl QrCode {
     }
 
     pub fn encode_data(&mut self, data: &str) {
-        let mut out_bytes = [0u8;128];
+        let mut out_bytes = [0u8;256];
         let size = encode_byte_segment(data,
                                        &mut out_bytes).unwrap();
         let version = self.version;
@@ -218,11 +150,7 @@ impl QrCode {
     }
 
     fn expected_byte_count(&self) -> usize {
-        match self.version  {
-            1 => 26,
-            2 => 44,
-            _ => todo!()
-        }
+        self.error_level.total_words(self.version)
     }
 }
 

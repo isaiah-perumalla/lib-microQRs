@@ -3,6 +3,14 @@ name = "tiny_qr"
 version = "0.1.0"
 edition = "2021"
 
+# need debug syms for profiling
+[profile.release]
+debug = true
+
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bench]]
+name = "benchmarks"
+path = "src/benches/benchmarks.rs"
 
 [dependencies]
