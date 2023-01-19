@@ -1,4 +1,4 @@
-![Build](https://github.com/isaiah-perumalla/qrs/actions/workflows/main.yml/badge.svg)
+![Build](https://github.com/isaiah-perumalla/qrs/actions/workflows/rust.yml/badge.svg)
 # Simple QR encoder
 
 
