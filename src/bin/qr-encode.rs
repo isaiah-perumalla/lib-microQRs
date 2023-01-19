@@ -1,12 +1,11 @@
-use tiny_qr::{BLACK, Canvas, qr, WHITE};
 use tiny_qr::bits::BitSquare;
 use tiny_qr::error_cc::ErrorLevel;
 use tiny_qr::qr::QrCode;
+use tiny_qr::{qr, Canvas, BLACK, WHITE};
 
 const PIXEL_PER_MOD: u32 = 16;
 const QUITE_ZONE_SIZE: u32 = 2;
 const VERSION: u8 = 2;
-
 
 fn main() {
     let module_sq_size: u32 = qr::version_to_size(VERSION) as u32;
@@ -24,11 +23,18 @@ fn ppm_img(module_sq_size: u32, bit_sq: &BitSquare, filename: &str) {
     let mut picture = Canvas::new(canvas_size, canvas_size);
     for y in 0..module_sq_size {
         for x in 0..module_sq_size {
-            let c = if bit_sq.is_set(x as u8, y as u8) { BLACK } else { WHITE };
+            let c = if bit_sq.is_set(x as u8, y as u8) {
+                BLACK
+            } else {
+                WHITE
+            };
             for i in 0..PIXEL_PER_MOD {
                 for j in 0..PIXEL_PER_MOD {
-                    picture.set_colour((x + QUITE_ZONE_SIZE) * PIXEL_PER_MOD + i,
-                                       (y + QUITE_ZONE_SIZE) * PIXEL_PER_MOD + j, &c);
+                    picture.set_colour(
+                        (x + QUITE_ZONE_SIZE) * PIXEL_PER_MOD + i,
+                        (y + QUITE_ZONE_SIZE) * PIXEL_PER_MOD + j,
+                        &c,
+                    );
                 }
             }
         }

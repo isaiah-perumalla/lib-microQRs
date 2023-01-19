@@ -4,17 +4,16 @@ use std::fs::File;
 use std::io::Write;
 
 pub mod bits;
-pub mod qr;
 pub mod error_cc;
 pub mod gf256;
-
+pub mod qr;
 
 pub const WHITE: RGB = RGB {
     red: 255,
     green: 255,
     blue: 255,
 };
-pub const GREY : RGB = RGB {
+pub const GREY: RGB = RGB {
     red: 169,
     green: 169,
     blue: 169,
@@ -31,7 +30,6 @@ pub struct RGB {
     green: u8,
     blue: u8,
 }
-
 
 fn serialize_rgb(pixels: &Vec<RGB>, size: usize) -> Vec<u8> {
     let mut output: Vec<u8> = Vec::with_capacity(size * 3);
@@ -59,12 +57,8 @@ impl Canvas {
 
     pub fn write_to_file(&mut self, filename: &str) {
         let mut file = init_ppm(filename, self.width, self.height);
-        let bytes = &serialize_rgb(
-            &self.pixels,
-            (self.width * self.height) as usize,
-        );
-        file.write_all(bytes)
-        .expect("error");
+        let bytes = &serialize_rgb(&self.pixels, (self.width * self.height) as usize);
+        file.write_all(bytes).expect("error");
         /* slow
         for pixel in &self.pixels {
             file.write_all(&[pixel.red, pixel.green, pixel.blue]).expect("error writing to a file");
@@ -86,4 +80,3 @@ fn init_ppm(filename: &str, width: u32, height: u32) -> File {
         .expect("error writing to a file");
     file
 }
-
