@@ -12,19 +12,30 @@ I have following goals
 
 
 ## Limitations
+1. current only support for bytes
+2. QR Level-1 to 5 support (need to implement block interleaving for it work on higher levels)
 
 ## Benchmarks
+currently the standard benchmark lib is only available on nightly builds of Rust so need to run the following to execute benchmarks
+if you dont have Rust nightly build use the following to install
+`rustup toolchain install nightly`
+To run the benchmarks run the following
 `cargo +nightly bench`
 
 ## Profiling 
-need to preserver frame pointer
+Profiler need frame pointer to workout the call graph, on x86 this is by conventions store in ebp register, which indicates the starting address of the function’s stack frame
+in release build the Rust omits storing the frame pointer, this causes issue for profiles when working out the call stack
+to avoid this we need to set the flag below to ensure rust compiler preserves the frame pointer
 
 `RUSTFLAGS='-C force-frame-pointers=y'`
 Build the benchmark executable using command below
 `RUSTFLAGS='-C force-frame-pointers=y' cargo +nightly bench --no-run`
 
 ### using Perf
+Run `perf stat target/release/deps/benchmarks-xxx --bench`
+this should provide an overall picture of how the program performs 
+
 `perf record -g `
 
-`perf report -g graph,0.5,caller`
+`perf report -g "graph,0.5,caller" `
 
