@@ -3,7 +3,7 @@
 goal of this project is to build something I find interesting using Rust
 Recently been curious how QR codes work, in particular the Error Correction using finite fields seemed interesting for me 
 
-1. No 3rd Party libs everything is written from scratch using stdlib
+1. No 3rd Party libs everything is written from scratch using **only** the stdlib
 2. minimize heap usage, take advantage of low-level control offered by rust and stack alloc where possible
 3. learn about galios finite fields, implement everything from ground up
 4. Benchmark and profile rust code
