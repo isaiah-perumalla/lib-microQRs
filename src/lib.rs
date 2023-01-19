@@ -6,7 +6,7 @@ use std::io::Write;
 pub mod bits;
 pub mod qr;
 pub mod error_cc;
-
+pub mod gf256;
 
 
 pub const WHITE: RGB = RGB {
