@@ -1,8 +1,11 @@
+extern crate core;
+
 use std::fs::File;
 use std::io::Write;
 
 pub mod bits;
 pub mod qr;
+pub mod error_cc;
 
 
 
