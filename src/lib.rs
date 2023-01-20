@@ -6,7 +6,7 @@ use std::io::Write;
 pub mod bits;
 pub mod error_cc;
 pub mod gf256;
-pub mod qr;
+pub mod codec;
 
 pub const WHITE: RGB = RGB {
     red: 255,
@@ -69,7 +69,7 @@ impl Canvas {
         Canvas {
             width,
             height,
-            pixels: vec![GREY; (width * height) as usize],
+            pixels: vec![WHITE; (width * height) as usize],
         }
     }
 }

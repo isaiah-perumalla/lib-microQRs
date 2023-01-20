@@ -37,5 +37,7 @@ this should provide an overall picture of how the program performs
 
 `perf record -g `
 
-`perf report -g "graph,0.5,caller" `
+`perf report -g "graph,0.5,caller"` 
+
+can also try `perf report -g "fractal,0.5,caller"` 
 

@@ -1,13 +1,23 @@
 use crate::bits::{BitSquare, MsbBitIter, Square};
 use crate::error_cc::ErrorLevel;
-use crate::qr::encode::{add_padding, encode_byte_segment};
+use crate::codec::encode::{add_padding, encode_byte_segment};
 use std::collections::HashSet;
+use crate::codec;
 
 pub fn version_to_size(v: u8) -> u8 {
     return 4 * v + 17;
 }
 
-static MASK_FN: [fn((u8, u8)) -> bool; 2] = [|(x, y)| 0 == (x + y) % 2, |(x, y)| 0 == (x + y) % 2];
+fn dark_module_pos(v: u8) -> (u8,u8) {
+    (8, 4 * v + 9)
+}
+
+static MASK_FN: [fn((u8, u8)) -> bool; 4] = [
+    |(x, y)| 0 == ((x + y) % 2),
+    |(x, y)| 0 == (y % 2),
+    |(x,y)| 0 == (x % 3),
+    |(x,y)| 0 == ((x + y) % 3)
+];
 
 pub struct QrCode {
     data: BitSquare,
@@ -32,7 +42,7 @@ impl QrCode {
             error_level,
         };
 
-        qr.set_format();
+        qr.set_format(1); //reserver format area
         qr.set_dark_module();
         return qr;
     }
@@ -46,7 +56,8 @@ impl QrCode {
         add_padding(&mut out_bytes[size..(size + padding)]);
         let size = ErrorLevel::L.add_error_codes(version, &mut out_bytes);
         self.set_code_words(&out_bytes[0..size]);
-        self.apply_mask(0);
+        const DEFAULT_MASK: u8 = 0;
+        self.apply_mask(DEFAULT_MASK);
     }
     pub fn data_sq(&self) -> &BitSquare {
         return &self.data;
@@ -56,13 +67,17 @@ impl QrCode {
         debug_assert!(mask_pattern < 8, "invalid mask patter {}", mask_pattern);
         let mask_fn = MASK_FN[mask_pattern as usize];
         let size = self.data.size;
-        for x in 0..size {
-            for y in 0..size {
-                if self.is_data_module((x, y)) && mask_fn((x, y)) {
-                    self.data.flip_bit(x, y);
+        for y in 0..size {
+            for x in 0..size {
+                if self.is_data_module((x, y)) {
+
+                    if mask_fn((x, y)) {
+                        self.data.flip_bit(x, y);
+                    }
                 }
             }
         }
+        self.set_format(mask_pattern);
     }
 
     pub fn reserved_area(&self) -> &BitSquare {
@@ -74,8 +89,8 @@ impl QrCode {
         return !self.reserved_bits.is_set(x, y);
     }
 
-    fn set_format(&mut self) {
-        let bits = self.error_level.format_bits(0);
+    fn set_format(&mut self, mask_level: u8) {
+        let bits = self.error_level.format_bits(mask_level);
         debug_assert!((bits >> 15) == 0, "format must be 15 bits");
         let bit = |i| 0 != (bits & (1u32 << i)); //is ith bit set
         for i in 0..6 {
@@ -107,8 +122,10 @@ impl QrCode {
         self.reserved_bits.set_value(x, y, true);
     }
 
+
+
     fn set_dark_module(&mut self) {
-        let (x, y) = (8, 4 * self.version + 9);
+        let (x, y) = dark_module_pos(self.version);
         self.set_function_module(x, y, true);
     }
 
@@ -132,7 +149,7 @@ impl QrCode {
                 self.data.set_value(x, y, bit);
                 bit_count += 1;
             } else {
-                break;
+                self.data.set_value(x, y, false); //remainder bits
             }
         }
         assert_eq!(bit_count, code_words.len() * 8);
@@ -168,7 +185,10 @@ impl ZigzagIter {
         let (x, _) = self.next_position.unwrap();
         let start_x = self.size - 1;
         //if started in odd x then every odd x would move left
-        if (start_x & 1) == (x & 1) {
+        if x < 6 && (x & 1) != 0 {
+            return Step::Left;
+        }
+        else if x >= 6 && (start_x & 1) == (x & 1) {
             return Step::Left;
         }
         return if self.traverse_up {
@@ -179,12 +199,7 @@ impl ZigzagIter {
     }
 
     fn end_position(&self) -> (u8, u8) {
-        let start_x = self.size - 1;
-        return if (start_x & 1) != 0 {
-            (0, self.size - 1)
-        } else {
-            (0, 0)
-        };
+        (0, self.size - 1)
     }
 
     fn next_pos(&mut self) -> Option<(u8, u8)> {
@@ -193,6 +208,11 @@ impl ZigzagIter {
         }
 
         let (x, y) = self.next_position.unwrap();
+        if x == 6 && y == 0 {
+            self.next_position = Some((4, 0));
+            self.traverse_up = false; // go down
+            return Some((5, 0));
+        }
         if (x, y) == self.end_position() {
             //currently in end position
             self.next_position = None;
@@ -236,14 +256,22 @@ impl Iterator for ZigzagIter {
 
 fn set_alignment_patterns(sq: &mut BitSquare, version: u8, reserved: &mut BitSquare) {
     assert!(version <= 5, "not supported for higher versions");
+
     match version {
+        1 => {}
         2 => {
             alignment_square(sq, (18, 18), reserved);
         }
         3 => {
             alignment_square(sq, (22, 22), reserved);
         }
-        _ => {}
+        4 => {
+            alignment_square(sq, (26, 26), reserved);
+        }
+        5 => {
+            alignment_square(sq, (30, 30), reserved);
+        }
+        _ => {todo!("not implemented for {}", version)}
     }
 }
 
@@ -378,72 +406,25 @@ pub fn test_encode_to_bytes() {
     assert_eq!(&expected_bytes, &out_bytess[0..expected_bytes.len()]);
 }
 
+
 #[test]
-fn test_zigzag_iter() {
-    let qr_4 = ZigzagIter::new(4);
-    let steps: Vec<(u8, u8)> = qr_4.collect();
+fn test_qr_data_module_iter_by_version() {
 
-    assert_eq!(4 * 4, steps.len());
-    assert_eq!(
-        steps,
-        vec![
-            (3, 3),
-            (2, 3),
-            (3, 2),
-            (2, 2),
-            (3, 1),
-            (2, 1),
-            (3, 0),
-            (2, 0),
-            (1, 0),
-            (0, 0),
-            (1, 1),
-            (0, 1),
-            (1, 2),
-            (0, 2),
-            (1, 3),
-            (0, 3)
-        ]
-    );
+    for i in 2..=5 {
+        let qr = QrCode::new(i, ErrorLevel::L);
+        let data_modules: Vec<(u8, u8)> = ZigzagIter::new(qr.data.size)
+            .filter(|p| qr.is_data_module(*p))
+            .collect();
 
-    let qr_5 = ZigzagIter::new(5);
-    let steps_5: Vec<(u8, u8)> = qr_5.collect();
-    assert_eq!(5 * 5, steps_5.len());
-    assert_eq!(
-        steps_5,
-        vec![
-            (4, 4),
-            (3, 4),
-            (4, 3),
-            (3, 3),
-            (4, 2),
-            (3, 2),
-            (4, 1),
-            (3, 1),
-            (4, 0),
-            (3, 0),
-            (2, 0),
-            (1, 0),
-            (2, 1),
-            (1, 1),
-            (2, 2),
-            (1, 2),
-            (2, 3),
-            (1, 3),
-            (2, 4),
-            (1, 4),
-            (0, 4),
-            (0, 3),
-            (0, 2),
-            (0, 1),
-            (0, 0)
-        ]
-    );
+        let expected_data_square_count = expected_data_module_count(i);
+        let reaminder_bits = 7;
+        assert_eq!(data_modules.len() , expected_data_square_count , "version={}", i);
+        assert_eq!(expected_data_square_count, reaminder_bits + ErrorLevel::L.total_words(i) * 8, "bit count mismatch for version={}", i);
+    }
 
-    let qr_21 = ZigzagIter::new(21);
-    let steps: Vec<(u8, u8)> = qr_21.collect();
-    assert_eq!(21 * 21, steps.len());
+
 }
+
 
 #[test]
 fn test_qr_data_module_iter() {
@@ -541,14 +522,40 @@ fn test_qr_data_module_iter() {
             i
         );
     }
+    println!("{:?}", &data_modules);
+    let expected_data_square_count = expected_data_module_count(1);
+    assert_eq!(data_modules.len(), expected_data_square_count);
+    // println!("len={},{:?}", data_modules.len(), data_modules);
+    let it:Vec<(u8,u8)> = ZigzagIter::new(qr.data.size)
+        .filter(|p| qr.is_data_module(*p) && p.0 < 6)
+        .collect();
+    let expected_pos = [(5u8,9u8), (4,9), (5,10), (4,10), (5,11), (4,11), (5, 12), (4, 12),
+        (3, 12), (2, 12), (3, 11), (2, 11), (3, 10), (2, 10), (3, 9), (2, 9), (1, 9), (0, 9), (1, 10),
+        (0, 10), (1, 11), (0, 11), (1, 12), (0, 12)];
+    assert_eq!(&expected_pos[0..], &it);
+    println!("dark_mod={:?}, {:?}", dark_module_pos(1),  it);
 
-    println!("len={},{:?}", data_modules.len(), data_modules);
+
+}
+
+fn expected_data_module_count(version: u8) -> usize {
+    debug_assert!(version <= 5, "not implemente for version > 5");
+    let aligment_squre_bits = if version > 1 {25} else {0};
+    let square_size = version_to_size(version) as usize;
+    let timing_sq = 2 * (square_size - 16) as usize;
+    let expected_data_square_count = (square_size * square_size) -
+        (3 * 49) //finding module
+        - 45 // seperators
+        - 30 // version info 15 * 2
+        - 1 // dark module
+        - timing_sq; //timing
+    expected_data_square_count - aligment_squre_bits
 }
 
 #[test]
-fn test_basic_qr() {
+fn test_basic_qr_level1() {
     let mut qr = QrCode::new(1, ErrorLevel::L);
-    qr.encode_data("isaiah-perumalla1");
+    qr.encode_data("isaiah-perumalla");
     //remove mask
     qr.apply_mask(0);
     let mut bit_string = String::new();
@@ -560,7 +567,55 @@ fn test_basic_qr() {
             bit_string.push('0');
         }
     }
-    let expected_unmasked_str = "0100000100010110100101110011011000010110100101100001011010000010110101110000011001010111001001110101011011010110000101101100011011000110000100110001000011001100010010100100010110111111101110001011100010101010";
+    let expected_unmasked_str = "0100000100000110100101110011011000010110100101100001011010000010110101110000011001010111001001110101011011010110000101101100011011000110000100001110110001111001010111010110010000010111000001111110011010001111";
+    assert_eq!(expected_unmasked_str.len(), bit_string.len());
+    assert_eq!(expected_unmasked_str, bit_string);
+}
+
+
+
+#[test]
+fn test_basic_qr_level2() {
+    let mut qr = QrCode::new(2, ErrorLevel::L);
+    qr.encode_data("isaiah-perumalla1/kingsgrove");
+    //remove mask
+    qr.apply_mask(0);
+    let data_bit_count  = ErrorLevel::L.total_words(2) * 8;
+    let mut bit_string = String::new();
+    for (x, y) in ZigzagIter::new(qr.data.size).filter(|p| qr.is_data_module(*p)).take(data_bit_count) {
+
+        let bit = qr.data.is_set(x, y);
+        if bit {
+            bit_string.push('1');
+        } else {
+            bit_string.push('0');
+        }
+
+    }
+    let expected_unmasked_str = "0100000111000110100101110011011000010110100101100001011010000010110101110000011001010111001001110101011011010110000101101100011011000110000100110001001011110110101101101001011011100110011101110011011001110111001001101111011101100110010100001110110000010001111011000001000101011011100001111010111100111100110100011011100101010000000110000010100110100011";
+    assert_eq!(expected_unmasked_str.len(), bit_string.len());
+    assert_eq!(expected_unmasked_str, bit_string);
+}
+
+#[test]
+fn test_basic_qr_level3() {
+    let mut qr = QrCode::new(3, ErrorLevel::L);
+    qr.encode_data("isaiah-perumalla1/kingsgrove-level3");
+    //remove mask
+    qr.apply_mask(0);
+    let data_bit_count  = ErrorLevel::L.total_words(3) * 8;
+    let mut bit_string = String::new();
+    for (x, y) in ZigzagIter::new(qr.data.size).filter(|p| qr.is_data_module(*p)).take(data_bit_count) {
+
+        let bit = qr.data.is_set(x, y);
+        if bit {
+            bit_string.push('1');
+        } else {
+            bit_string.push('0');
+        }
+
+    }
+    let expected_unmasked_str = "01000010001101101001011100110110000101101001011000010110100000101101011100000110010101110010011101010110110101100001011011000110110001100001001100010010111101101011011010010110111001100111011100110110011101110010011011110111011001100101001011010110110001100101011101100110010101101100001100110000111011000001000111101100000100011110110000010001111011000001000111101100000100011110110000010001111011000001000111101100000100011110110000010001001101001101010101100111101100011011100000001010111000011001100010100000000100001011001111110101000010111101100010110100";
     assert_eq!(expected_unmasked_str.len(), bit_string.len());
     assert_eq!(expected_unmasked_str, bit_string);
 }

@@ -1,17 +1,18 @@
 use tiny_qr::bits::BitSquare;
 use tiny_qr::error_cc::ErrorLevel;
-use tiny_qr::qr::QrCode;
-use tiny_qr::{qr, Canvas, BLACK, WHITE};
+use tiny_qr::codec::QrCode;
+use tiny_qr::{codec, Canvas, BLACK, WHITE};
 
 const PIXEL_PER_MOD: u32 = 16;
 const QUITE_ZONE_SIZE: u32 = 2;
-const VERSION: u8 = 2;
+const VERSION: u8 = 4;
 
 fn main() {
-    let module_sq_size: u32 = qr::version_to_size(VERSION) as u32;
+    let module_sq_size: u32 = codec::version_to_size(VERSION) as u32;
 
     let mut qr = QrCode::new(VERSION, ErrorLevel::L);
-    qr.encode_data("JOHN-PERUMALLA");
+    ppm_img(module_sq_size, qr.data_sq(), "qr-no-data");
+    qr.encode_data("isaiah-perumalla/kinggrove/london");
 
     ppm_img(module_sq_size, qr.data_sq(), "qr-test");
     ppm_img(module_sq_size, qr.reserved_area(), "qr-test-reserved");
