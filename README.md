@@ -20,7 +20,7 @@ currently the standard benchmark lib is only available on nightly builds of Rust
 if you dont have Rust nightly build use the following to install
 `rustup toolchain install nightly`
 To run the benchmarks run the following
-`cargo +nightly bench`
+`cargo +nightly bench --bench benchmark`
 
 ## Profiling 
 Profiler need frame pointer to workout the call graph, on x86 this is by conventions store in ebp register, which indicates the starting address of the function’s stack frame
@@ -37,5 +37,7 @@ this should provide an overall picture of how the program performs
 
 `perf record -g `
 
-`perf report -g "graph,0.5,caller" `
+`perf report -g "graph,0.5,caller"` 
+
+can also try `perf report -g "fractal,0.5,caller"` 
 

@@ -108,16 +108,8 @@ impl ErrorLevel {
         gen_polynomial(ecc_size)
     }
 
-    fn data_info(&self, version: u8) -> DataCapacity {
-        match self {
-            ErrorLevel::L => DATA_CAPACITY_L[version as usize],
-            _ => todo!(),
-        }
-    }
     pub fn compute_ecc(&self, version: u8, block_data: &[u8], ecc_buffer: &mut [u8]) -> usize {
-        let data_capacity_info = self.data_info(version);
-        let ecc_size = data_capacity_info.ec_words_per_blk;
-        let mut data_poly = gf256::Poly::from((block_data.len() - 1) as u8, block_data);
+        let data_poly = gf256::Poly::from((block_data.len() - 1) as u8, block_data);
         let divisor = self.get_ecc_gf_poly(version);
         let data_p = data_poly.multiply(Term(divisor.degree, 1));
         let remainder = data_p.div_remainder(&divisor);

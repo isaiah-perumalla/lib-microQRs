@@ -1,4 +1,3 @@
-
 const MAX_DEGREE: usize = 256;
 const GF256_INVERSE: [u8; 256] = [
     0, 1, 142, 244, 71, 167, 122, 186, 173, 157, 221, 152, 61, 170, 93, 150, 216, 114, 192, 88,
@@ -34,6 +33,7 @@ pub fn get_inverse(x: u8) -> u8 {
     // }
 }
 
+#[cfg(debug_assertions)] //used for checking inverses
 fn compute_inv_table() -> [u8; 256] {
     let mut inv = [0u8; 256];
     inv[0] = 0;
@@ -250,12 +250,12 @@ impl<'a> Iterator for TermIter<'a> {
 
 pub fn gen_polynomial(size: u8) -> Poly {
     let mut p = Poly::from(1, &[1, 1]);
-    let mut α_i = 1;
-    let X = Term(1, 1);
-    for i in 1u8..size {
+    let mut alpha_i = 1;
+    const X: Term = Term(1, 1);
+    for _ in 1u8..size {
         let mut p_x_i = p.multiply(X);
-        α_i = gf256_mult(α_i, 2u8); //α^i
-        p.mut_mult_scalar(α_i);
+        alpha_i = gf256_mult(alpha_i, 2u8); //α^i
+        p.mut_mult_scalar(alpha_i);
         p_x_i.mut_add_poly(&p);
         p = p_x_i;
     }
@@ -459,8 +459,6 @@ pub mod gf_tests {
         let divisor = Poly::from(4, &[1, 15, 54, 120, 64]);
         let remainder = poly_1.div_remainder(&divisor);
 
-        let expected_div = [18u8, 218, 223];
-        let expected_rem = [55u8, 230, 120, 217];
         let remainder_terms: Vec<Term> = remainder.terms().collect();
         assert_eq!(
             &remainder_terms,
