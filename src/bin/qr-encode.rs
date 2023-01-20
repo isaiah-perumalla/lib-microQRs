@@ -1,6 +1,6 @@
 use tiny_qr::bits::BitSquare;
-use tiny_qr::error_cc::ErrorLevel;
 use tiny_qr::codec::QrCode;
+use tiny_qr::error_cc::ErrorLevel;
 use tiny_qr::{codec, Canvas, BLACK, WHITE};
 
 const PIXEL_PER_MOD: u32 = 16;

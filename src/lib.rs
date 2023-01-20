@@ -4,9 +4,9 @@ use std::fs::File;
 use std::io::Write;
 
 pub mod bits;
+pub mod codec;
 pub mod error_cc;
 pub mod gf256;
-pub mod codec;
 
 pub const WHITE: RGB = RGB {
     red: 255,
