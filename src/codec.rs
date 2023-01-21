@@ -17,6 +17,17 @@ static MASK_FN: [fn((u8, u8)) -> bool; 4] = [
     |(x, y)| 0 == ((x + y) % 3),
 ];
 
+pub fn encode_to_qr(data: &str) -> Result<QrCode, EncodingErr> {
+    todo!()
+}
+
+#[derive(Debug)]
+pub enum EncodingErr {
+    NotAscii,
+    NotAlphaNumeric,
+    DataTooLong,
+}
+
 pub struct QrCode {
     data: BitSquare,
     reserved_bits: BitSquare,
@@ -155,7 +166,7 @@ impl QrCode {
     }
 }
 
-pub struct ZigzagIter {
+struct ZigzagIter {
     next_position: Option<(u8, u8)>,
     size: u8,
     traverse_up: bool, //direction
@@ -318,19 +329,13 @@ fn finding_pattern(sq: &mut BitSquare, top_left: (u8, u8), changes: &mut BitSqua
     changes.set_square(Square::new(1, (x + 3, y + 3)), true);
 }
 
-pub mod encode {
+mod encode {
     use crate::bits::BigEndianBitWriter;
-
-    #[derive(Debug)]
-    pub enum EnumEncodingErr {
-        NotAscii,
-        NotAlphaNumeric,
-        DataTooLong,
-    }
+    use crate::codec::EncodingErr;
 
     // encode string to data code words
     //include mode type and padding bits
-    pub fn encode_byte_segment(data: &str, out: &mut [u8]) -> Result<usize, EnumEncodingErr> {
+    pub(crate) fn encode_byte_segment(data: &str, out: &mut [u8]) -> Result<usize, EncodingErr> {
         let mut bit_writer = BigEndianBitWriter::new(out);
         let char_count = data.chars().count();
 
@@ -352,9 +357,9 @@ pub mod encode {
     }
 
     pub fn add_padding(bytes: &mut [u8]) {
-        let pad_bytes = [0xEC, 0x11];
+        const PAD_BYTES: [u8; 2] = [0xEC, 0x11];
         for i in 0..bytes.len() {
-            let b = pad_bytes[(i & 1)]; //cycle between odd and even
+            let b = PAD_BYTES[(i & 1)]; //cycle between odd and even
             bytes[i] = b;
         }
     }
