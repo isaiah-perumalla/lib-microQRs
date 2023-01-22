@@ -1,14 +1,14 @@
 extern crate core;
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
 
 pub mod bits;
 pub mod codec;
 pub mod error_cc;
 pub mod gf256;
 
-pub struct Version(u8);
+pub struct Version(pub u8);
 
 impl Version {
     //alignment square position for version 1-5
@@ -20,6 +20,31 @@ impl Version {
     }
     fn dark_module_pos(&self) -> (u8, u8) {
         (8, 4 * self.0 + 9)
+    }
+
+    fn timing_pattern_iter(&self) -> impl Iterator<Item = (u8, u8, bool)> {
+        let size = self.square_size();
+        let mut y = 8;
+        let mut x = 8;
+
+        std::iter::from_fn(move || {
+            if y < size-8 {
+                let is_dark = (y & 1) == 0;
+                let pos = y;
+                y += 1;
+                Some((6, pos, is_dark))
+
+            }
+            else if x < size-8 {
+                let is_dark = (x & 1) == 0;
+                let pos = x;
+                x += 1;
+                Some((pos, 6, is_dark))
+            }
+            else {
+                None
+            }
+        })
     }
 
     fn alignment_squares_iter(&self) -> impl Iterator<Item=ConcentricSquare> {
@@ -58,11 +83,34 @@ impl Version {
         ]
     }
 
-    pub(crate) fn reserved_iter(&self) -> impl Iterator<Item = (u8, u8, bool)> {
+    pub fn reserved_iter(&self) -> impl Iterator<Item = (u8, u8, bool)> {
         let finding_pat = self.finding_pattern();
-        let alignment_square_iter = self.alignment_squares_iter();
+        let mut it_0 = finding_pat[0].iter_squares();
+        let mut it_1 = finding_pat[1].iter_squares();
+        let mut it_2 = finding_pat[2].iter_squares();
+        let mut timing_iter = self.timing_pattern_iter();
+        let mut alignment_square_iter = self.alignment_squares_iter()
+                                                    .flat_map(|it| it.iter_squares());
+
         std::iter::from_fn(move || {
-            None
+            if let Some(v) = it_0.next() {
+                Some(v)
+            }
+            else if let Some(v) = it_1.next() {
+                Some(v)
+            }
+            else if let Some(v) = it_2.next() {
+                Some(v)
+            }
+            else if let Some(v) = alignment_square_iter.next() {
+                Some(v)
+            }
+            else if let Some(v) = timing_iter.next() {
+                Some(v)
+            }
+            else {
+                None
+            }
         })
     }
 }
@@ -162,11 +210,11 @@ impl Canvas {
         }*/
     }
 
-    pub fn new(width: u32, height: u32) -> Canvas {
+    pub fn new(width: u32, height: u32, bg_color: RGB) -> Canvas {
         Canvas {
             width,
             height,
-            pixels: vec![WHITE; (width * height) as usize],
+            pixels: vec![bg_color; (width * height) as usize],
         }
     }
 }
