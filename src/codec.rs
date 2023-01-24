@@ -290,10 +290,16 @@ fn draw_finding_pattern(sq: &mut BitSquare, changes: &mut BitSquare) {
     finding_pattern(sq, (0, 0), changes);
 
     //separators
-    sq.draw_vert((7, 0), 8, is_dark);
+    let from = (7, 0);
+    for i in 0..8 {
+        sq.set_value(from.0, from.1 + i, is_dark);
+    }
     changes.draw_vert((7, 0), 8, true);
 
-    sq.draw_horizontal((0, 7), 8, is_dark);
+    let from1 = (0, 7);
+    for i in 0..8 {
+        sq.set_value(from1.0 + i, from1.1, is_dark);
+    }
     changes.draw_horizontal((0, 7), 8, true);
 
     //top right
