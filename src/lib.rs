@@ -8,24 +8,21 @@ pub mod codec;
 pub mod error_cc;
 pub mod gf256;
 
-
-pub struct Module((u8,u8), u8);  //position and flags
+pub struct Module((u8, u8), u8); //position and flags
 impl Module {
-
-    const IS_DARK_MASK:u8 = 1u8 << 7;
-    const TYPE_MASK:u8 = 0xF;
-    const TYPE_DATA:u8 = 0x1;
-    const TYPE_RESERVED:u8 = 0x0;
+    const IS_DARK_MASK: u8 = 1u8 << 7;
+    const TYPE_MASK: u8 = 0xF;
+    const TYPE_DATA: u8 = 0x1;
+    const TYPE_RESERVED: u8 = 0x0;
     pub fn is_dark(&self) -> bool {
         let flags = self.1;
         0 != flags & Self::IS_DARK_MASK // bit 0 is is dark
     }
 
-
-    pub fn position(&self) -> (u8,u8) {
+    pub fn position(&self) -> (u8, u8) {
         self.0
     }
-    pub fn data(position: (u8,u8), is_dark: bool) -> Module {
+    pub fn data(position: (u8, u8), is_dark: bool) -> Module {
         let mut flags = Self::TYPE_DATA;
         if is_dark {
             flags |= Self::IS_DARK_MASK;
@@ -33,8 +30,8 @@ impl Module {
         Module(position, flags)
     }
 
-    pub fn reserved(position: (u8,u8), is_dark:bool) -> Module {
-        let mut flags = Self::TYPE_RESERVED ;
+    pub fn reserved(position: (u8, u8), is_dark: bool) -> Module {
+        let mut flags = Self::TYPE_RESERVED;
         if is_dark {
             flags |= Self::IS_DARK_MASK;
         }
@@ -47,16 +44,12 @@ impl Module {
     }
 }
 
-
-
 pub struct Version(pub u8);
-
 
 impl Version {
     //alignment square position for version 1-5
-    const ALIGNMENT_POSITIONS:[ &'static[(u8,u8)];6] = [&[], &[],
-                                                &[(18,18)], &[(22,22)],
-                                                &[(26,26)], &[(30,30)]];
+    const ALIGNMENT_POSITIONS: [&'static [(u8, u8)]; 6] =
+        [&[], &[], &[(18, 18)], &[(22, 22)], &[(26, 26)], &[(30, 30)]];
     pub fn square_size(&self) -> u8 {
         4 * self.0 + 17
     }
@@ -70,48 +63,47 @@ impl Version {
         let mut x = 8;
 
         std::iter::from_fn(move || {
-            if y < size-8 {
+            if y < size - 8 {
                 let is_dark = (y & 1) == 0;
                 let pos = y;
                 y += 1;
                 Some((6, pos, is_dark))
-
-            }
-            else if x < size-8 {
+            } else if x < size - 8 {
                 let is_dark = (x & 1) == 0;
                 let pos = x;
                 x += 1;
                 Some((pos, 6, is_dark))
-            }
-            else {
+            } else {
                 None
             }
         })
     }
 
-    fn separator_squares_iter(&self) -> impl Iterator<Item=(u8, u8, bool)> {
-        let horizonal = |x,y| (0u8..8).map(move |i| (x+i, y));
-        let vert = |x,y| (0u8..8).map(move |i| (x, y + i));
+    fn separator_squares_iter(&self) -> impl Iterator<Item = (u8, u8, bool)> {
+        let horizonal = |x, y| (0u8..8).map(move |i| (x + i, y));
+        let vert = |x, y| (0u8..8).map(move |i| (x, y + i));
         let size = self.square_size();
-        let mut separators = horizonal(0, 7).chain(vert(7, 0))
-            .chain(vert(size - 8, 0)).chain(horizonal(size-8, 7))
-            .chain(horizonal(0, size-8)).chain(vert(7, size-8));
-        const WHITE:bool = false;
+        let mut separators = horizonal(0, 7)
+            .chain(vert(7, 0))
+            .chain(vert(size - 8, 0))
+            .chain(horizonal(size - 8, 7))
+            .chain(horizonal(0, size - 8))
+            .chain(vert(7, size - 8));
+        const WHITE: bool = false;
         std::iter::from_fn(move || {
-            if let Some((x,y))  = separators.next() {
-                Some((x,y,WHITE))
-            }
-            else {
+            if let Some((x, y)) = separators.next() {
+                Some((x, y, WHITE))
+            } else {
                 None
             }
         })
     }
-    fn dark_module_location(&self) -> (u8,u8) {
-        (8, (4*self.0 + 9))
+    fn dark_module_location(&self) -> (u8, u8) {
+        (8, (4 * self.0 + 9))
     }
 
-    pub fn is_data_location(&self, location: (u8,u8)) -> bool {
-        let (x,y) = location;
+    pub fn is_data_location(&self, location: (u8, u8)) -> bool {
+        let (x, y) = location;
         if x == 6 || y == 6 {
             return false; // timing area
         }
@@ -120,25 +112,31 @@ impl Version {
         }
         let size = self.square_size();
         let reserved = [
-            Rect((0,0), (8,8)), //top_left includes version info area
-            Rect((size-8, 0), (size-1, 8)), //top_right
-            Rect((0,size-8), (8,size-1)),
-
+            Rect((0, 0), (8, 8)),               //top_left includes version info area
+            Rect((size - 8, 0), (size - 1, 8)), //top_right
+            Rect((0, size - 8), (8, size - 1)),
         ];
 
-        if  reserved.iter().any(|rect| rect.contains(location)) {
+        if reserved.iter().any(|rect| rect.contains(location)) {
             return false;
         }
-        if self.alignment_squares_iter().any(|sq| sq.contains(location)) {
+        if self
+            .alignment_squares_iter()
+            .any(|sq| sq.contains(location))
+        {
             return false;
         }
         true
     }
-    fn alignment_square(center: (u8,u8)) -> ConcentricSquare {
-        ConcentricSquare{center, size: 3, color_bits: 0b101}
+    fn alignment_square(center: (u8, u8)) -> ConcentricSquare {
+        ConcentricSquare {
+            center,
+            size: 3,
+            color_bits: 0b101,
+        }
     }
 
-    fn alignment_squares_iter(&self) -> impl Iterator<Item=ConcentricSquare> {
+    fn alignment_squares_iter(&self) -> impl Iterator<Item = ConcentricSquare> {
         let mut i = 0;
         let square_positions = Self::ALIGNMENT_POSITIONS[self.0 as usize];
         std::iter::from_fn(move || {
@@ -146,14 +144,13 @@ impl Version {
                 let pos = square_positions[i];
                 i += 1;
                 Some(Self::alignment_square(pos))
-            }
-            else {
+            } else {
                 None
             }
         })
     }
 
-    fn finding_pattern(&self) -> impl Iterator<Item=ConcentricSquare> {
+    fn finding_pattern(&self) -> impl Iterator<Item = ConcentricSquare> {
         let size = self.square_size();
         let mut i = 0;
         let mut squares = [
@@ -176,58 +173,54 @@ impl Version {
         std::iter::from_fn(move || {
             if i < 3 {
                 i += 1;
-                Some(squares[i-1])
-            }
-            else {
+                Some(squares[i - 1])
+            } else {
                 None
             }
         })
     }
 
     pub fn reserved_iter(&self) -> impl Iterator<Item = Module> {
-        let to_module:fn((u8,u8,bool)) -> Module = |(x,y,is_dark)| Module::reserved((x,y), is_dark);
-        let mut finding_pattern_it = self.finding_pattern()
-            .flat_map(move |sq| sq.iter_squares().map(  to_module));
+        let to_module: fn((u8, u8, bool)) -> Module =
+            |(x, y, is_dark)| Module::reserved((x, y), is_dark);
+        let mut finding_pattern_it = self
+            .finding_pattern()
+            .flat_map(move |sq| sq.iter_squares().map(to_module));
         let mut timing_iter = self.timing_pattern_iter().map(to_module);
-        let mut alignment_square_iter = self.alignment_squares_iter()
-                                                    .flat_map(move |it| it.iter_squares().map(to_module));
-
+        let mut alignment_square_iter = self
+            .alignment_squares_iter()
+            .flat_map(move |it| it.iter_squares().map(to_module));
 
         let dark_module = Module::reserved(self.dark_module_location(), true);
-        let mut seperator_iter = self.separator_squares_iter()
-            .map(|(x,y,is_dark)| Module::reserved((x,y), is_dark))
-                        .chain(std::iter::once(dark_module));
+        let mut seperator_iter = self
+            .separator_squares_iter()
+            .map(|(x, y, is_dark)| Module::reserved((x, y), is_dark))
+            .chain(std::iter::once(dark_module));
         std::iter::from_fn(move || {
             if let Some(v) = finding_pattern_it.next() {
                 Some(v)
-            }
-            else if let Some(v) = alignment_square_iter.next() {
+            } else if let Some(v) = alignment_square_iter.next() {
                 Some(v)
-            }
-            else if let Some(v) = timing_iter.next() {
+            } else if let Some(v) = timing_iter.next() {
                 Some(v)
-            }
-            else if let Some(v) = seperator_iter.next() {
+            } else if let Some(v) = seperator_iter.next() {
                 Some(v)
-            }
-            else {
+            } else {
                 None
             }
         })
     }
 }
 
-
 //rectagle enclosed by top_right and bottom_right
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct Rect((u8,u8), (u8,u8));
+pub(crate) struct Rect((u8, u8), (u8, u8));
 
 impl Rect {
-    pub(crate) fn contains(&self, point: (u8,u8)) -> bool {
+    pub(crate) fn contains(&self, point: (u8, u8)) -> bool {
         let (top_left, bottom_right) = (self.0, self.1);
-        let (x,y) = point;
-        x >= top_left.0 && x <= bottom_right.0
-            && y >= top_left.1 && y <= bottom_right.1
+        let (x, y) = point;
+        x >= top_left.0 && x <= bottom_right.0 && y >= top_left.1 && y <= bottom_right.1
     }
 }
 
@@ -239,15 +232,18 @@ struct ConcentricSquare {
 }
 
 impl ConcentricSquare {
-    const EMPTY: ConcentricSquare = ConcentricSquare{center:(0,0), size:0 ,color_bits:0};
+    const EMPTY: ConcentricSquare = ConcentricSquare {
+        center: (0, 0),
+        size: 0,
+        color_bits: 0,
+    };
 
-    fn contains(&self, location:(u8,u8)) -> bool {
+    fn contains(&self, location: (u8, u8)) -> bool {
         let size = self.size;
-        let (top_left_x, top_left_y) = (self.center.0-size-1, self.center.1-size-1);
-        let (bottom_right_x, bottom_right_y) = (self.center.0 + size-1, self.center.1 + size-1);
-        let (x,y) = location;
-        x >= top_left_x && x <= bottom_right_x &&
-            y >= top_left_y && y <= bottom_right_y
+        let (top_left_x, top_left_y) = (self.center.0 - size - 1, self.center.1 - size - 1);
+        let (bottom_right_x, bottom_right_y) = (self.center.0 + size - 1, self.center.1 + size - 1);
+        let (x, y) = location;
+        x >= top_left_x && x <= bottom_right_x && y >= top_left_y && y <= bottom_right_y
     }
 
     fn square_points(&self, out: &mut [(u8, u8, bool)]) -> usize {
@@ -318,7 +314,7 @@ pub struct Canvas {
     width: u32,
     height: u32,
     pixel_size: u8,
-    quite_zone: u8
+    quite_zone: u8,
 }
 
 impl Canvas {
@@ -353,14 +349,13 @@ impl Canvas {
         }
     }
 
-    pub fn new(width: u32, height: u32, bg_color: RGB,quite_zone:u8, pixel_size: u8 ) -> Canvas {
+    pub fn new(width: u32, height: u32, bg_color: RGB, quite_zone: u8, pixel_size: u8) -> Canvas {
         Canvas {
             width,
             height,
             quite_zone: quite_zone,
             pixel_size: pixel_size,
             pixels: vec![bg_color; (width * height) as usize],
-
         }
     }
 }
@@ -459,15 +454,14 @@ mod tests {
     #[test]
     fn test_alignment_square() {
         assert_eq!(Version(1).alignment_squares_iter().count(), 0);
-        let squares:Vec<ConcentricSquare> = Version(2).alignment_squares_iter().collect();
+        let squares: Vec<ConcentricSquare> = Version(2).alignment_squares_iter().collect();
         assert_eq!(squares.len(), 1);
         let square = squares.get(0).unwrap();
 
-        let set:HashSet<(u8,u8,bool)> = HashSet::from_iter(square.iter_squares());
-        assert_eq!(true, set.contains(&(17,17,false)));
-        assert_eq!(true, set.contains(&(16,16,true)));
-        assert_eq!(false, set.contains(&(15,15,true)));
-
+        let set: HashSet<(u8, u8, bool)> = HashSet::from_iter(square.iter_squares());
+        assert_eq!(true, set.contains(&(17, 17, false)));
+        assert_eq!(true, set.contains(&(16, 16, true)));
+        assert_eq!(false, set.contains(&(15, 15, true)));
     }
 
     #[test]
@@ -481,8 +475,14 @@ mod tests {
                 let (bottom_right_x, bottom_right_y) = bottom_right;
                 for x in top_left_x..=bottom_right_x {
                     for y in top_left_y..=bottom_right_y {
-                        assert_eq!(false, v.is_data_location((x, y)),
-                                   "data module location {},{} version={}", x, y, v_num);
+                        assert_eq!(
+                            false,
+                            v.is_data_location((x, y)),
+                            "data module location {},{} version={}",
+                            x,
+                            y,
+                            v_num
+                        );
                     }
                 }
             };
@@ -497,7 +497,6 @@ mod tests {
             if v_num == 2 {
                 //check alignment pattern
                 check_reserved_sq((16, 16), (20, 20));
-
             }
             if v_num == 3 {
                 //check alignment pattern

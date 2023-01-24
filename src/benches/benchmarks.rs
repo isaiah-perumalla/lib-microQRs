@@ -3,6 +3,8 @@ mod bench {
     extern crate test;
 
     use test::Bencher;
+    use tiny_qr::codec::QrCode;
+    use tiny_qr::error_cc::ErrorLevel;
     use tiny_qr::gf256::{gen_polynomial, Poly};
 
     const SAMPLE_DATA: [u8; 108] = [
@@ -13,6 +15,7 @@ mod bench {
         17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236,
         17, 236,
     ];
+
     #[bench]
     fn bench_error_codes(b: &mut Bencher) {
         // let inv = tiny_qr::error_correction::gf256::get_inverse(2);
@@ -24,6 +27,21 @@ mod bench {
 
             let remainder = data.div_remainder(gen_poly);
             test::black_box(remainder);
+        });
+    }
+
+    #[bench]
+    fn bench_bytes_to_qrcode_v5(b: &mut Bencher) {
+        // let inv = tiny_qr::error_correction::gf256::get_inverse(2);
+        const VERSION: u8 = 5;
+        let data_str = "Psalm-127 Unless the Lord builds the house, the builders labor in vain.";
+
+        b.iter(|| {
+            let mut qr = QrCode::new(VERSION, ErrorLevel::L);
+            test::black_box(&mut qr);
+
+            qr.encode_data(data_str);
+            test::black_box(qr);
         });
     }
 }
