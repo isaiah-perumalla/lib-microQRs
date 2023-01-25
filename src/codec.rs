@@ -92,7 +92,7 @@ impl QrCode {
         return &self.reserved_bits;
     }
 
-    fn is_data_module(&self, pos: (u8, u8)) -> bool {
+    pub(crate) fn is_data_module(&self, pos: (u8, u8)) -> bool {
         let (x, y) = pos;
         return !self.reserved_bits.is_set(x, y);
     }
@@ -166,14 +166,14 @@ impl QrCode {
     }
 }
 
-struct ZigzagIter {
+pub(crate) struct ZigzagIter {
     next_position: Option<(u8, u8)>,
     size: u8,
     traverse_up: bool, //direction
 }
 
 impl ZigzagIter {
-    fn new(size: u8) -> ZigzagIter {
+    pub(crate) fn new(size: u8) -> ZigzagIter {
         return ZigzagIter {
             next_position: Some((size - 1, size - 1)), //bottom right corner
             size,
