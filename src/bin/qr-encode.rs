@@ -1,26 +1,20 @@
-use tiny_qr::bits::BitSquare;
-use tiny_qr::error_cc::ErrorLevel;
-use tiny_qr::{BLACK, Canvas, Code, codec, EncodingErr, GREEN, GREY, Module, ORANGE, RED, RGB, Version, WHITE, YELLOW};
-
-const PIXEL_PER_MOD: u32 = 16;
-const QUITE_ZONE_SIZE: u32 = 2;
-const VERSION: u8 = 5;
+use std::io::Write;
+use microQRs::img::{Canvas, BLACK, GREEN, RED, RGB, WHITE};
+use microQRs::{Code, Module};
 
 fn main() {
-
     let data = "Unless the Lord builds the house,
     the builders labor in vain. Psalm-127 www.biblegateway.com/passage";
 
-
-    let result = tiny_qr::encode::<144>(data);
+    let result = microQRs::encode::<144>(data);
     if let Ok(code) = result {
-        to_ppm_img(&code, "qr-code");
+        // to_ppm_img(&code, "qr-code");
     } else {
         eprintln!("encode err ");
     }
 }
 
-fn to_ppm_img<const S: usize>(code: &Code<S>, file_name: &str) {
+fn to_ppm_img<const S: usize>(code: &Code<S>, writer: impl Write) {
     let mut img = Canvas::for_version(code.version);
     const COLORS: [RGB; 2] = [WHITE, RED];
     for m in code.version.reserved_iter() {
@@ -34,30 +28,7 @@ fn to_ppm_img<const S: usize>(code: &Code<S>, file_name: &str) {
         img.set_pixel(x as u32, y as u32, &COLORS[i]);
     }
 
-    img.write_to_file(file_name);
-}
-
-fn ppm_img(module_sq_size: u32, bit_sq: &BitSquare, filename: &str) {
-    let canvas_size: u32 = ((module_sq_size + QUITE_ZONE_SIZE * 2) * PIXEL_PER_MOD) as u32;
-
-    let mut picture = Canvas::new(
-        canvas_size,
-        canvas_size,
-        GREY,
-        QUITE_ZONE_SIZE as u8,
-        PIXEL_PER_MOD as u8,
-    );
-    for y in 0..module_sq_size {
-        for x in 0..module_sq_size {
-            let color = if bit_sq.is_set(x as u8, y as u8) {
-                RED
-            } else {
-                WHITE
-            };
-            picture.set_pixel(x, y, &color);
-        }
-    }
-    picture.write_to_file(filename);
+    // img.write_to_file(file_name);
 }
 
 fn module_to_color(m: Module) -> RGB {
@@ -71,7 +42,8 @@ fn module_to_color(m: Module) -> RGB {
 #[cfg(test)]
 mod tests {
     use crate::module_to_color;
-    use tiny_qr::{BLACK, Canvas, GREEN, ORANGE, RED, RGB, Version, WHITE, YELLOW};
+    use microQRs::img::{Canvas, BLACK, GREEN, ORANGE, RED, RGB, WHITE, YELLOW};
+    use microQRs::Version;
 
     #[test] //visual lib to see mandatory/reserved areas are rendered
     fn test_reserved_area() {

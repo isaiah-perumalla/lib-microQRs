@@ -1,11 +1,20 @@
+use std::env;
+use std::io::stdout;
+use microQRs::img::{BLACK, WHITE};
+
+///
+/// simple usage for qr library
+/// Reads text from stdin and output a QR code in PPM format https://en.wikipedia.org/wiki/Netpbm
 fn main() {
-    let data = "Unless the Lord builds the house,
-    the builders labor in vain. Psalm-127 www.biblegateway.com/passage";
-    let result = tiny_qr::encode::<144>(data);
-    if let Ok(code) = result {
-        println!("code_words={:?}", code.code_words());
-        // to_ppm_img(&code, "qr-code");
+    let mut args = env::args();
+    if let Some(data) = args.nth(1) {
+        let result = microQRs::encode::<144>(&data);
+        if let Ok(code) = result {
+            microQRs::img::ppm::to_img(&code, [WHITE, BLACK], &mut stdout());
+        } else {
+            eprintln!("encode err ");
+        }
     } else {
-        eprintln!("encode err ");
+        println!("usage simple <text-to-encode> ");
     }
 }

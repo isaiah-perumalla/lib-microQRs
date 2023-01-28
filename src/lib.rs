@@ -1,18 +1,13 @@
 extern crate core;
 
 use crate::bits::{BigEndianBitWriter, MsbBitIter};
-use EncodingErr::DataTooLong;
-use crate::codec::{MASK_FN, MaskFN};
 use crate::error_cc::ErrorLevel;
-use std::fs::File;
-use std::io::{Read, Write};
-
+use EncodingErr::DataTooLong;
 
 pub mod bits;
-pub mod codec;
 pub mod error_cc;
 pub mod gf256;
-
+pub mod img;
 pub fn encode<const S: usize>(data: &str) -> Result<Code<S>, EncodingErr> {
     let mut encoded = [0; S];
     const MAX_VERSION: u8 = 5u8;
@@ -64,21 +59,19 @@ impl<const S: usize> Code<S> {
         &self.data[0..num_words]
     }
 
-    pub fn data_module_iter(&self) -> impl Iterator<Item =((u8,u8), bool)> + '_{
+    pub fn data_module_iter(&self) -> impl Iterator<Item = ((u8, u8), bool)> + '_ {
         let version_num = self.version.0;
         let num_words = self.err_level.total_words(version_num);
         let code_words = &self.data[0..num_words];
-         let mut bit_iter = MsbBitIter::new(code_words);
-        let mut data_it = Version(version_num).data_region_iter();
+        let bit_iter = MsbBitIter::new(code_words);
+        let data_it = Version(version_num).data_region_iter();
         std::iter::zip(data_it, bit_iter)
-
     }
 
     pub fn module_iter(&self) -> impl Iterator<Item = Module> + '_ {
         let mask_level = 0;
         let version_num = self.version.0;
         let format_modules = self.version.format_modules(self.err_level, mask_level);
-        println!("{:?}", &format_modules);
         let mut reserved_it = Version(version_num).reserved_iter();
         let mut data_it = Version(version_num).data_region_iter();
 
@@ -193,9 +186,6 @@ impl Version {
             index += 1;
         }
         mask_module
-    }
-    fn dark_module_pos(&self) -> (u8, u8) {
-        (8, 4 * self.0 + 9)
     }
 
     fn timing_pattern_iter(&self) -> impl Iterator<Item = (u8, u8, bool)> {
@@ -323,7 +313,7 @@ impl Version {
 
     pub fn data_region_iter(&self) -> impl Iterator<Item = (u8, u8)> {
         let size = self.square_size();
-        let mut iter = ZigzagIter::new(size);
+        let iter = ZigzagIter::new(size);
         let v = Version(self.0);
         iter.filter(move |pos| v.is_data_location(*pos))
     }
@@ -380,12 +370,6 @@ struct ConcentricSquare {
 }
 
 impl ConcentricSquare {
-    const EMPTY: ConcentricSquare = ConcentricSquare {
-        center: (0, 0),
-        size: 0,
-        color_bits: 0,
-    };
-
     fn contains(&self, location: (u8, u8)) -> bool {
         let size = self.size;
         let (top_left_x, top_left_y) = (self.center.0 + 1 - size, self.center.1 + 1 - size);
@@ -436,109 +420,12 @@ impl ConcentricSquare {
     }
 }
 
-pub const WHITE: RGB = RGB(255, 255, 255);
-pub const RED: RGB = RGB(255, 0, 0);
-
-pub const GREY: RGB = RGB(169, 169, 169);
-pub const GREEN: RGB = RGB(0, 255, 0);
-pub const YELLOW: RGB = RGB(255, 0, 255);
-pub const ORANGE: RGB = RGB(255, 165, 0);
-
-pub const BLACK: RGB = RGB(0, 0, 0);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct RGB(u8, u8, u8);
-
-fn serialize_rgb(pixels: &Vec<RGB>, size: usize) -> Vec<u8> {
-    let mut output: Vec<u8> = Vec::with_capacity(size * 3);
-    for pix in pixels {
-        output.push(pix.0);
-        output.push(pix.1);
-        output.push(pix.2);
-    }
-    output
-}
-
-pub struct Canvas {
-    pixels: Vec<RGB>,
-    width: u32,
-    height: u32,
-    pixel_size: u8,
-    quite_zone: u8,
-}
-
-impl Canvas {
-    const DEFAULT_QUITE_ZONE_SIZE: u8 = 2;
-    const PIXEL_PER_MOD: u8 = 16;
-    pub fn set_colour(&mut self, x: u32, y: u32, colour: &RGB) {
-        // make this more natural? In C++ you can overload () to get a functor
-        if x > 0 && y > 0 && x < self.width && y < self.height {
-            self.pixels[(self.width * y + x) as usize] = *colour;
-        }
-    }
-
-    pub fn write_to_file(&mut self, filename: &str) {
-        let mut file = init_ppm(filename, self.width, self.height);
-        let bytes = &serialize_rgb(&self.pixels, (self.width * self.height) as usize);
-        file.write_all(bytes).expect("error");
-    }
-
-    pub fn set_pixel(&mut self, x: u32, y: u32, color: &RGB) {
-        let pixel_size = self.pixel_size as u32;
-        let quite_zone = self.quite_zone as u32;
-        for i in 0..pixel_size {
-            for j in 0..pixel_size {
-                self.set_colour(
-                    (x + quite_zone) * pixel_size + i,
-                    (y + quite_zone) * pixel_size + j,
-                    &color,
-                );
-            }
-        }
-    }
-
-    pub fn for_version(v: Version) -> Canvas {
-        let size = v.square_size() as u32;
-        let canvas_size: u32 =
-            ((size + Self::DEFAULT_QUITE_ZONE_SIZE as u32 * 2) * Self::PIXEL_PER_MOD as u32) as u32;
-
-        Canvas::new(
-            canvas_size,
-            canvas_size,
-            GREY,
-            Self::DEFAULT_QUITE_ZONE_SIZE,
-            Self::PIXEL_PER_MOD,
-        )
-    }
-
-    pub fn new(width: u32, height: u32, bg_color: RGB, quite_zone: u8, pixel_size: u8) -> Canvas {
-        Canvas {
-            width,
-            height,
-            quite_zone: quite_zone,
-            pixel_size: pixel_size,
-            pixels: vec![bg_color; (width * height) as usize],
-        }
-    }
-}
-
-fn init_ppm(filename: &str, width: u32, height: u32) -> File {
-    let mut file = File::create(format!("{}.ppm", filename)).expect("couldn't create");
-    file.write_all(format!("P6 {} {} 255 ", width, height).as_bytes())
-        .expect("error writing to a file");
-    file
-}
-#[cfg(test)]
-mod tests;
-
-
 #[derive(Debug)]
 pub enum EncodingErr {
     NotAscii,
     NotAlphaNumeric,
     DataTooLong,
 }
-
 
 pub(crate) struct ZigzagIter {
     next_position: Option<(u8, u8)>,
@@ -642,3 +529,13 @@ pub fn add_padding(bytes: &mut [u8]) {
         bytes[i] = b;
     }
 }
+
+#[cfg(test)]
+mod tests;
+
+pub static MASK_FN: [fn((u8, u8)) -> bool; 4] = [
+    |(x, y)| 0 == ((x + y) % 2),
+    |(_, y)| 0 == (y % 2),
+    |(x, _)| 0 == (x % 3),
+    |(x, y)| 0 == ((x + y) % 3),
+];
