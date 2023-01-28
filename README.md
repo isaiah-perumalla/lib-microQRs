@@ -1,5 +1,5 @@
 ![Build](https://github.com/isaiah-perumalla/qrs/actions/workflows/rust.yml/badge.svg)
-![Build](https://github.com/isaiah-perumalla/qrs/actions/workflows/clippy.yml/badge.svg)
+![Build](https://github.com/isaiah-perumalla/qrs/actions/workflows/rust-clippy.yml/badge.svg)
 # QR encoder implemented in Rust (no dependecies)
 goal of this project is to build something I find interesting using Rust
 Recently been curious how QR codes work, in particular the Error Correction using finite fields seemed interesting for me ,
