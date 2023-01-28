@@ -1,8 +1,12 @@
 extern crate core;
 
+use crate::bits::MsbBitIter;
+use crate::codec::encoder::{add_padding, encode_byte_segment};
+use crate::codec::EncodingErr::DataTooLong;
+use crate::codec::{EncodingErr, MaskFN, ZigzagIter, MASK_FN};
+use crate::error_cc::ErrorLevel;
 use std::fs::File;
 use std::io::{Read, Write};
-use crate::codec::EncodingErr;
 
 pub mod bits;
 pub mod codec;
@@ -10,15 +14,92 @@ pub mod error_cc;
 pub mod gf256;
 
 pub fn encode<const S: usize>(data: &str) -> Result<Code<S>, EncodingErr> {
-    Ok(Code{
-        size: 16, data: [0;S]
+    let mut encoded = [0; S];
+    const MAX_VERSION: u8 = 5u8;
+    let size = encode_byte_segment(data, &mut encoded)?;
+    if size > S {
+        return Err(DataTooLong);
+    }
+    let err_level = ErrorLevel::L;
+    let v = (1..=MAX_VERSION)
+        .filter(|v| err_level.data_code_words(*v) >= size)
+        .map(|v| Version(v))
+        .next();
+    if v.is_none() {
+        return Err(DataTooLong);
+    }
+    let version = v.unwrap();
+    if err_level.total_words(version.0) >= S {
+        return Err(DataTooLong);
+    }
+    let padding = err_level.data_code_words(version.0) - size;
+    add_padding(&mut encoded[size..(size + padding)]);
+    let size = err_level.add_error_codes(version.0, &mut encoded);
+    let code_words = &encoded[0..size];
+    let expected_bytes = err_level.total_words(version.0);
+
+    debug_assert!(
+        code_words.len() == expected_bytes,
+        "code_words len for version {}, {} but was {}",
+        version.0,
+        expected_bytes,
+        code_words.len()
+    );
+    Ok(Code {
+        version,
+        err_level,
+        data: encoded,
     })
 }
 
 pub struct Code<const S: usize> {
-    pub size: u8,
-    pub data:[u8; S]
+    pub version: Version,
+    pub err_level: ErrorLevel,
+    pub data: [u8; S],
 }
+
+impl<const S: usize> Code<S> {
+    pub fn code_words(&self) -> &[u8] {
+        let num_words = self.err_level.total_words(self.version.0);
+        &self.data[0..num_words]
+    }
+
+    pub fn module_iter(&self) -> impl Iterator<Item = Module> + '_ {
+        let mask_level = 0;
+        let version_num = self.version.0;
+        let format_modules = self.version.format_modules(self.err_level, mask_level);
+        println!("{:?}", &format_modules);
+        let mut reserved_it = Version(version_num).reserved_iter();
+        let mut data_it = Version(version_num).data_region_iter();
+
+        let num_words = self.err_level.total_words(version_num);
+        let code_words = &self.data[0..num_words];
+        let mut bit_iter = MsbBitIter::new(code_words);
+        let mut format_index = 0;
+        std::iter::from_fn(move || {
+            if let Some(m) = reserved_it.next() {
+                Some(m)
+            } else if let Some((x, y)) = data_it.next() {
+                let bit = match bit_iter.next() {
+                    Some(bit) => bit,
+                    _ => false,
+                };
+                if MASK_FN[mask_level as usize]((x, y)) {
+                    Some(Module::data((x, y), !bit))
+                } else {
+                    Some(Module::data((x, y), bit))
+                }
+            } else if format_index < 30 {
+                let i = format_index;
+                format_index += 1;
+                Some(format_modules[i])
+            } else {
+                None
+            }
+        })
+    }
+}
+#[derive(Copy, Clone, Debug)]
 pub struct Module((u8, u8), u8); //position and flags
 impl Module {
     const IS_DARK_MASK: u8 = 1u8 << 7;
@@ -64,6 +145,44 @@ impl Version {
         [&[], &[], &[(18, 18)], &[(22, 22)], &[(26, 26)], &[(30, 30)]];
     pub fn square_size(&self) -> u8 {
         4 * self.0 + 17
+    }
+
+    pub fn format_modules(&self, err_level: ErrorLevel, mask_level: u8) -> [Module; 30] {
+        let mut mask_module = [Module::reserved((0, 0), false); 30];
+        let new_mod = |pos, bit| Module::reserved(pos, bit);
+        let mut index = 0;
+        let bits = err_level.format_bits(mask_level);
+        debug_assert!((bits >> 15) == 0, "format must be 15 bits");
+        let bit = |i| 0 != (bits & (1u32 << i)); //is ith bit set
+        for i in 0..6 {
+            mask_module[index] = new_mod((8, i), bit(i));
+            index += 1;
+        }
+        mask_module[index] = new_mod((8, 7), bit(6));
+        index += 1;
+        mask_module[index] = new_mod((8, 8), bit(7));
+        index += 1;
+        mask_module[index] = new_mod((7, 8), bit(8));
+        index += 1;
+        let square_size = self.square_size();
+        //top horizontal part
+        for i in 9..15 {
+            mask_module[index] = new_mod((14 - i, 8), bit(i));
+            index += 1;
+        }
+
+        //second copy of version info
+        //top right part
+        for i in 0..8 {
+            mask_module[index] = new_mod((square_size - 1 - i, 8), bit(i));
+            index += 1;
+        }
+        //bottom left vertical
+        for i in 8..15 {
+            mask_module[index] = new_mod((8, square_size - 15 + i), bit(i));
+            index += 1;
+        }
+        mask_module
     }
     fn dark_module_pos(&self) -> (u8, u8) {
         (8, 4 * self.0 + 9)
@@ -165,7 +284,7 @@ impl Version {
     fn finding_pattern(&self) -> impl Iterator<Item = ConcentricSquare> {
         let size = self.square_size();
         let mut i = 0;
-        let mut squares = [
+        let squares = [
             ConcentricSquare {
                 center: (3, 3),
                 size: 4,
@@ -192,9 +311,9 @@ impl Version {
         })
     }
 
-    pub fn data_region_iter(&self) -> impl Iterator<Item =(u8, u8)> {
+    pub fn data_region_iter(&self) -> impl Iterator<Item = (u8, u8)> {
         let size = self.square_size();
-        let mut iter = crate::codec::ZigzagIter::new(size);
+        let mut iter = ZigzagIter::new(size);
         let v = Version(self.0);
         iter.filter(move |pos| v.is_data_location(*pos))
     }
@@ -259,8 +378,8 @@ impl ConcentricSquare {
 
     fn contains(&self, location: (u8, u8)) -> bool {
         let size = self.size;
-        let (top_left_x, top_left_y) = (self.center.0 + 1 - size , self.center.1 + 1 - size );
-        let (bottom_right_x, bottom_right_y) = (self.center.0 + size -1 , self.center.1 + size - 1);
+        let (top_left_x, top_left_y) = (self.center.0 + 1 - size, self.center.1 + 1 - size);
+        let (bottom_right_x, bottom_right_y) = (self.center.0 + size - 1, self.center.1 + size - 1);
         let (x, y) = location;
         x >= top_left_x && x <= bottom_right_x && y >= top_left_y && y <= bottom_right_y
     }
@@ -352,10 +471,6 @@ impl Canvas {
         let mut file = init_ppm(filename, self.width, self.height);
         let bytes = &serialize_rgb(&self.pixels, (self.width * self.height) as usize);
         file.write_all(bytes).expect("error");
-        /* slow
-        for pixel in &self.pixels {
-            file.write_all(&[pixel.red, pixel.green, pixel.blue]).expect("error writing to a file");
-        }*/
     }
 
     pub fn set_pixel(&mut self, x: u32, y: u32, color: &RGB) {
@@ -374,7 +489,8 @@ impl Canvas {
 
     pub fn for_version(v: Version) -> Canvas {
         let size = v.square_size() as u32;
-        let canvas_size: u32 = ((size + Self::DEFAULT_QUITE_ZONE_SIZE as u32 * 2) * Self::PIXEL_PER_MOD as u32) as u32;
+        let canvas_size: u32 =
+            ((size + Self::DEFAULT_QUITE_ZONE_SIZE as u32 * 2) * Self::PIXEL_PER_MOD as u32) as u32;
 
         Canvas::new(
             canvas_size,
@@ -405,10 +521,10 @@ fn init_ppm(filename: &str, width: u32, height: u32) -> File {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ConcentricSquare, Version};
-    use std::collections::HashSet;
     use crate::codec::{QrCode, ZigzagIter};
     use crate::error_cc::ErrorLevel;
+    use crate::{encode, ConcentricSquare, Module, Version};
+    use std::collections::HashSet;
 
     #[test]
     fn test_concentric_square_iter() {
@@ -536,8 +652,16 @@ mod tests {
             if v_num == 2 {
                 //check alignment pattern
                 check_reserved_sq((16, 16), (20, 20));
-                assert_eq!(true, v.is_data_location((15, 15)), "should be data areas (15,15)");
-                assert_eq!(true, v.is_data_location((21, 21)), "should be data areas (15,15)");
+                assert_eq!(
+                    true,
+                    v.is_data_location((15, 15)),
+                    "should be data areas (15,15)"
+                );
+                assert_eq!(
+                    true,
+                    v.is_data_location((21, 21)),
+                    "should be data areas (15,15)"
+                );
             }
             if v_num == 3 {
                 //check alignment pattern
@@ -562,13 +686,390 @@ mod tests {
             .filter(|p| qr.is_data_module(*p))
             .collect();
 
-        println!("{:?}" , &data_modules);
-        let mods:Vec<(u8, u8)> = Version(VERSION).data_region_iter().collect();
-        let expected_order = &[(24u8, 24u8), (23, 24), (24, 23), (23, 23), (24, 22), (23, 22),
-                            (24, 21), (23, 21), (24, 20), (23, 20), (24, 19), (23, 19), (24, 18), (23, 18), (24, 17),
-                                (23, 17), (24, 16), (23, 16), (24, 15), (23, 15), (24, 14), (23, 14), (24, 13), (23, 13), (24, 12), (23, 12), (24, 11), (23, 11), (24, 10), (23, 10), (24, 9), (23, 9), (22, 9), (21, 9), (22, 10), (21, 10), (22, 11), (21, 11), (22, 12), (21, 12), (22, 13), (21, 13), (22, 14), (21, 14), (22, 15), (21, 15), (22, 16), (21, 16), (22, 17), (21, 17), (22, 18), (21, 18), (22, 19), (21, 19), (22, 20), (21, 20), (22, 21), (21, 21), (22, 22), (21, 22), (22, 23), (21, 23), (22, 24), (21, 24), (20, 24), (19, 24), (20, 23), (19, 23), (20, 22), (19, 22), (20, 21), (19, 21), (20, 15), (19, 15), (20, 14), (19, 14), (20, 13), (19, 13), (20, 12), (19, 12), (20, 11), (19, 11), (20, 10), (19, 10), (20, 9), (19, 9), (18, 9), (17, 9), (18, 10), (17, 10), (18, 11), (17, 11), (18, 12), (17, 12), (18, 13), (17, 13), (18, 14), (17, 14), (18, 15), (17, 15), (18, 21), (17, 21), (18, 22), (17, 22), (18, 23), (17, 23), (18, 24), (17, 24), (16, 24), (15, 24), (16, 23), (15, 23), (16, 22), (15, 22), (16, 21), (15, 21), (15, 20), (15, 19), (15, 18), (15, 17), (15, 16), (16, 15), (15, 15), (16, 14), (15, 14), (16, 13), (15, 13), (16, 12), (15, 12), (16, 11), (15, 11), (16, 10), (15, 10), (16, 9), (15, 9), (16, 8), (15, 8), (16, 7), (15, 7), (16, 5), (15, 5), (16, 4), (15, 4), (16, 3), (15, 3), (16, 2), (15, 2), (16, 1), (15, 1), (16, 0), (15, 0), (14, 0), (13, 0), (14, 1), (13, 1), (14, 2), (13, 2), (14, 3), (13, 3), (14, 4), (13, 4), (14, 5), (13, 5), (14, 7), (13, 7), (14, 8), (13, 8), (14, 9), (13, 9), (14, 10), (13, 10), (14, 11), (13, 11), (14, 12), (13, 12), (14, 13), (13, 13), (14, 14), (13, 14), (14, 15), (13, 15), (14, 16), (13, 16), (14, 17), (13, 17), (14, 18), (13, 18), (14, 19), (13, 19), (14, 20), (13, 20), (14, 21), (13, 21), (14, 22), (13, 22), (14, 23), (13, 23), (14, 24), (13, 24), (12, 24), (11, 24), (12, 23), (11, 23), (12, 22), (11, 22), (12, 21), (11, 21), (12, 20), (11, 20), (12, 19), (11, 19), (12, 18), (11, 18), (12, 17), (11, 17), (12, 16), (11, 16), (12, 15), (11, 15), (12, 14), (11, 14), (12, 13), (11, 13), (12, 12), (11, 12), (12, 11), (11, 11), (12, 10), (11, 10), (12, 9), (11, 9), (12, 8), (11, 8), (12, 7), (11, 7), (12, 5), (11, 5), (12, 4), (11, 4), (12, 3), (11, 3), (12, 2), (11, 2), (12, 1), (11, 1), (12, 0), (11, 0), (10, 0), (9, 0), (10, 1), (9, 1), (10, 2), (9, 2), (10, 3), (9, 3), (10, 4), (9, 4), (10, 5), (9, 5), (10, 7), (9, 7), (10, 8), (9, 8), (10, 9), (9, 9), (10, 10), (9, 10), (10, 11), (9, 11), (10, 12), (9, 12), (10, 13), (9, 13), (10, 14), (9, 14), (10, 15), (9, 15), (10, 16), (9, 16), (10, 17), (9, 17), (10, 18), (9, 18), (10, 19), (9, 19), (10, 20), (9, 20), (10, 21), (9, 21), (10, 22), (9, 22), (10, 23), (9, 23), (10, 24), (9, 24), (8, 16), (7, 16), (8, 15), (7, 15), (8, 14), (7, 14), (8, 13), (7, 13), (8, 12), (7, 12), (8, 11), (7, 11), (8, 10), (7, 10), (8, 9), (7, 9), (5, 9), (4, 9), (5, 10), (4, 10), (5, 11), (4, 11), (5, 12), (4, 12), (5, 13), (4, 13), (5, 14), (4, 14), (5, 15), (4, 15), (5, 16), (4, 16), (3, 16), (2, 16), (3, 15), (2, 15), (3, 14), (2, 14), (3, 13), (2, 13), (3, 12), (2, 12), (3, 11), (2, 11), (3, 10), (2, 10), (3, 9), (2, 9), (1, 9), (0, 9), (1, 10), (0, 10), (1, 11), (0, 11), (1, 12), (0, 12), (1, 13), (0, 13), (1, 14), (0, 14), (1, 15), (0, 15), (1, 16), (0, 16)];
+        println!("{:?}", &data_modules);
+        let mods: Vec<(u8, u8)> = Version(VERSION).data_region_iter().collect();
+        let expected_order = &[
+            (24u8, 24u8),
+            (23, 24),
+            (24, 23),
+            (23, 23),
+            (24, 22),
+            (23, 22),
+            (24, 21),
+            (23, 21),
+            (24, 20),
+            (23, 20),
+            (24, 19),
+            (23, 19),
+            (24, 18),
+            (23, 18),
+            (24, 17),
+            (23, 17),
+            (24, 16),
+            (23, 16),
+            (24, 15),
+            (23, 15),
+            (24, 14),
+            (23, 14),
+            (24, 13),
+            (23, 13),
+            (24, 12),
+            (23, 12),
+            (24, 11),
+            (23, 11),
+            (24, 10),
+            (23, 10),
+            (24, 9),
+            (23, 9),
+            (22, 9),
+            (21, 9),
+            (22, 10),
+            (21, 10),
+            (22, 11),
+            (21, 11),
+            (22, 12),
+            (21, 12),
+            (22, 13),
+            (21, 13),
+            (22, 14),
+            (21, 14),
+            (22, 15),
+            (21, 15),
+            (22, 16),
+            (21, 16),
+            (22, 17),
+            (21, 17),
+            (22, 18),
+            (21, 18),
+            (22, 19),
+            (21, 19),
+            (22, 20),
+            (21, 20),
+            (22, 21),
+            (21, 21),
+            (22, 22),
+            (21, 22),
+            (22, 23),
+            (21, 23),
+            (22, 24),
+            (21, 24),
+            (20, 24),
+            (19, 24),
+            (20, 23),
+            (19, 23),
+            (20, 22),
+            (19, 22),
+            (20, 21),
+            (19, 21),
+            (20, 15),
+            (19, 15),
+            (20, 14),
+            (19, 14),
+            (20, 13),
+            (19, 13),
+            (20, 12),
+            (19, 12),
+            (20, 11),
+            (19, 11),
+            (20, 10),
+            (19, 10),
+            (20, 9),
+            (19, 9),
+            (18, 9),
+            (17, 9),
+            (18, 10),
+            (17, 10),
+            (18, 11),
+            (17, 11),
+            (18, 12),
+            (17, 12),
+            (18, 13),
+            (17, 13),
+            (18, 14),
+            (17, 14),
+            (18, 15),
+            (17, 15),
+            (18, 21),
+            (17, 21),
+            (18, 22),
+            (17, 22),
+            (18, 23),
+            (17, 23),
+            (18, 24),
+            (17, 24),
+            (16, 24),
+            (15, 24),
+            (16, 23),
+            (15, 23),
+            (16, 22),
+            (15, 22),
+            (16, 21),
+            (15, 21),
+            (15, 20),
+            (15, 19),
+            (15, 18),
+            (15, 17),
+            (15, 16),
+            (16, 15),
+            (15, 15),
+            (16, 14),
+            (15, 14),
+            (16, 13),
+            (15, 13),
+            (16, 12),
+            (15, 12),
+            (16, 11),
+            (15, 11),
+            (16, 10),
+            (15, 10),
+            (16, 9),
+            (15, 9),
+            (16, 8),
+            (15, 8),
+            (16, 7),
+            (15, 7),
+            (16, 5),
+            (15, 5),
+            (16, 4),
+            (15, 4),
+            (16, 3),
+            (15, 3),
+            (16, 2),
+            (15, 2),
+            (16, 1),
+            (15, 1),
+            (16, 0),
+            (15, 0),
+            (14, 0),
+            (13, 0),
+            (14, 1),
+            (13, 1),
+            (14, 2),
+            (13, 2),
+            (14, 3),
+            (13, 3),
+            (14, 4),
+            (13, 4),
+            (14, 5),
+            (13, 5),
+            (14, 7),
+            (13, 7),
+            (14, 8),
+            (13, 8),
+            (14, 9),
+            (13, 9),
+            (14, 10),
+            (13, 10),
+            (14, 11),
+            (13, 11),
+            (14, 12),
+            (13, 12),
+            (14, 13),
+            (13, 13),
+            (14, 14),
+            (13, 14),
+            (14, 15),
+            (13, 15),
+            (14, 16),
+            (13, 16),
+            (14, 17),
+            (13, 17),
+            (14, 18),
+            (13, 18),
+            (14, 19),
+            (13, 19),
+            (14, 20),
+            (13, 20),
+            (14, 21),
+            (13, 21),
+            (14, 22),
+            (13, 22),
+            (14, 23),
+            (13, 23),
+            (14, 24),
+            (13, 24),
+            (12, 24),
+            (11, 24),
+            (12, 23),
+            (11, 23),
+            (12, 22),
+            (11, 22),
+            (12, 21),
+            (11, 21),
+            (12, 20),
+            (11, 20),
+            (12, 19),
+            (11, 19),
+            (12, 18),
+            (11, 18),
+            (12, 17),
+            (11, 17),
+            (12, 16),
+            (11, 16),
+            (12, 15),
+            (11, 15),
+            (12, 14),
+            (11, 14),
+            (12, 13),
+            (11, 13),
+            (12, 12),
+            (11, 12),
+            (12, 11),
+            (11, 11),
+            (12, 10),
+            (11, 10),
+            (12, 9),
+            (11, 9),
+            (12, 8),
+            (11, 8),
+            (12, 7),
+            (11, 7),
+            (12, 5),
+            (11, 5),
+            (12, 4),
+            (11, 4),
+            (12, 3),
+            (11, 3),
+            (12, 2),
+            (11, 2),
+            (12, 1),
+            (11, 1),
+            (12, 0),
+            (11, 0),
+            (10, 0),
+            (9, 0),
+            (10, 1),
+            (9, 1),
+            (10, 2),
+            (9, 2),
+            (10, 3),
+            (9, 3),
+            (10, 4),
+            (9, 4),
+            (10, 5),
+            (9, 5),
+            (10, 7),
+            (9, 7),
+            (10, 8),
+            (9, 8),
+            (10, 9),
+            (9, 9),
+            (10, 10),
+            (9, 10),
+            (10, 11),
+            (9, 11),
+            (10, 12),
+            (9, 12),
+            (10, 13),
+            (9, 13),
+            (10, 14),
+            (9, 14),
+            (10, 15),
+            (9, 15),
+            (10, 16),
+            (9, 16),
+            (10, 17),
+            (9, 17),
+            (10, 18),
+            (9, 18),
+            (10, 19),
+            (9, 19),
+            (10, 20),
+            (9, 20),
+            (10, 21),
+            (9, 21),
+            (10, 22),
+            (9, 22),
+            (10, 23),
+            (9, 23),
+            (10, 24),
+            (9, 24),
+            (8, 16),
+            (7, 16),
+            (8, 15),
+            (7, 15),
+            (8, 14),
+            (7, 14),
+            (8, 13),
+            (7, 13),
+            (8, 12),
+            (7, 12),
+            (8, 11),
+            (7, 11),
+            (8, 10),
+            (7, 10),
+            (8, 9),
+            (7, 9),
+            (5, 9),
+            (4, 9),
+            (5, 10),
+            (4, 10),
+            (5, 11),
+            (4, 11),
+            (5, 12),
+            (4, 12),
+            (5, 13),
+            (4, 13),
+            (5, 14),
+            (4, 14),
+            (5, 15),
+            (4, 15),
+            (5, 16),
+            (4, 16),
+            (3, 16),
+            (2, 16),
+            (3, 15),
+            (2, 15),
+            (3, 14),
+            (2, 14),
+            (3, 13),
+            (2, 13),
+            (3, 12),
+            (2, 12),
+            (3, 11),
+            (2, 11),
+            (3, 10),
+            (2, 10),
+            (3, 9),
+            (2, 9),
+            (1, 9),
+            (0, 9),
+            (1, 10),
+            (0, 10),
+            (1, 11),
+            (0, 11),
+            (1, 12),
+            (0, 12),
+            (1, 13),
+            (0, 13),
+            (1, 14),
+            (0, 14),
+            (1, 15),
+            (0, 15),
+            (1, 16),
+            (0, 16),
+        ];
         assert_eq!(&mods, &expected_order);
+    }
 
+    #[test]
+    pub fn test_encode() {
+        let code = encode::<128>("isaiah-perumalla").unwrap();
+
+        //ErrorLevel::L
+        let expected_words = [
+            65, 6, 151, 54, 22, 150, 22, 130, 215, 6, 87, 39, 86, 214, 22, 198, 198, 16, 236, 121,
+            93, 100, 23, 7, 230, 143,
+        ];
+        assert_eq!(&expected_words, code.code_words());
+    }
+
+    #[test]
+    pub fn test_version_format_modules() {
+        let v = Version(1);
+        let modules = v.format_modules(ErrorLevel::L, 0);
+        assert_eq!(true, modules.iter().all(|m| !m.is_data()));
+
+        println!("{:?}", &modules);
     }
 }
-

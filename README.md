@@ -22,6 +22,9 @@ if you dont have Rust nightly build use the following to install
 To run the benchmarks run the following
 `cargo +nightly bench --bench benchmark`
 
+To run a specific bench, pass the args as below. it will run only benchmark begining with "bench_code"
+`cargo +nightly bench -- bench_code`
+
 ## Profiling 
 Profiler need frame pointer to workout the call graph, on x86 this is by conventions store in ebp register, which indicates the starting address of the function’s stack frame
 in release build the Rust omits storing the frame pointer, this causes issue for profiles when working out the call stack

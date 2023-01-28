@@ -1,5 +1,5 @@
 use crate::bits::{BitSquare, MsbBitIter, Square};
-use crate::codec::encode::{add_padding, encode_byte_segment};
+use crate::codec::encoder::{add_padding, encode_byte_segment};
 use crate::error_cc::ErrorLevel;
 
 pub fn version_to_size(v: u8) -> u8 {
@@ -9,8 +9,8 @@ pub fn version_to_size(v: u8) -> u8 {
 fn dark_module_pos(v: u8) -> (u8, u8) {
     (8, 4 * v + 9)
 }
-
-static MASK_FN: [fn((u8, u8)) -> bool; 4] = [
+pub type MaskFN = fn((u8, u8)) -> bool;
+pub static MASK_FN: [fn((u8, u8)) -> bool; 4] = [
     |(x, y)| 0 == ((x + y) % 2),
     |(_, y)| 0 == (y % 2),
     |(x, _)| 0 == (x % 3),
@@ -64,7 +64,8 @@ impl QrCode {
         let padding = code_words_size - size;
         add_padding(&mut out_bytes[size..(size + padding)]);
         let size = ErrorLevel::L.add_error_codes(version, &mut out_bytes);
-        self.set_code_words(&out_bytes[0..size]);
+        let code_words = &out_bytes[0..size];
+        self.set_code_words(code_words);
         const DEFAULT_MASK: u8 = 0;
         self.apply_mask(DEFAULT_MASK);
     }
@@ -335,18 +336,23 @@ fn finding_pattern(sq: &mut BitSquare, top_left: (u8, u8), changes: &mut BitSqua
     changes.set_square(Square::new(1, (x + 3, y + 3)), true);
 }
 
-mod encode {
+pub(crate) mod encoder {
     use crate::bits::BigEndianBitWriter;
     use crate::codec::EncodingErr;
+    use crate::codec::EncodingErr::DataTooLong;
+
+    const SEG_MODE_BYTES: u8 = 0b0100;
 
     // encode string to data code words
     //include mode type and padding bits
-    pub(crate) fn encode_byte_segment(data: &str, out: &mut [u8]) -> Result<usize, EncodingErr> {
-        let mut bit_writer = BigEndianBitWriter::new(out);
+    pub fn encode_byte_segment(data: &str, out: &mut [u8]) -> Result<usize, EncodingErr> {
         let char_count = data.chars().count();
-
-        let segment_mode = 0b0100; //bytes
-        bit_writer.append_bits(segment_mode, 4);
+        if char_count > out.len() {
+            return Err(DataTooLong);
+        }
+        let mut bit_writer = BigEndianBitWriter::new(out);
+        //bytes
+        bit_writer.append_bits(SEG_MODE_BYTES, 4);
         bit_writer.append_bits(char_count as u8, 8);
         for ch in data.chars() {
             let byte = ch as u8;
@@ -374,7 +380,7 @@ mod encode {
 #[cfg(test)]
 mod encoder_test {
     use crate::bits::Square;
-    use crate::codec::encode::encode_byte_segment;
+    use crate::codec::encoder::encode_byte_segment;
     use crate::codec::{dark_module_pos, version_to_size, QrCode, ZigzagIter};
     use crate::error_cc::ErrorLevel;
     use std::collections::HashSet;

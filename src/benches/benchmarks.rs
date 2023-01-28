@@ -34,7 +34,7 @@ mod bench {
     fn bench_bytes_to_qrcode_v5(b: &mut Bencher) {
         // let inv = tiny_qr::error_correction::gf256::get_inverse(2);
         const VERSION: u8 = 5;
-        let data_str = "Psalm-127 Unless the Lord builds the house, the builders labor in vain.";
+        let data_str =  "Unless the Lord builds the house,the builders labor in vain. Psalm-127 www.biblegateway.com/passage";
 
         b.iter(|| {
             let mut qr = QrCode::new(VERSION, ErrorLevel::L);
@@ -42,6 +42,21 @@ mod bench {
 
             qr.encode_data(data_str);
             test::black_box(qr);
+        });
+    }
+
+    #[bench]
+    fn bench_code_bytes_to_qrcode_v5(b: &mut Bencher) {
+        let data_str =  "Unless the Lord builds the house,the builders labor in vain. Psalm-127 www.biblegateway.com/passage";
+        b.iter(|| {
+            for _ in 0..100 {
+                let result = test::black_box(tiny_qr::encode::<144>(data_str));
+                if let Ok(code) = result {
+                    test::black_box(&code);
+                } else {
+                    panic!("err on encode");
+                }
+            }
         });
     }
 }
