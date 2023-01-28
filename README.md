@@ -38,9 +38,18 @@ Build the benchmark executable using command below
 Run `perf stat target/release/deps/benchmarks-xxx --bench`
 this should provide an overall picture of how the program performs 
 
+`perf record -g -e L1-dcache-loads,L1-dcache-load-misses ./target/release/deps/benchmarks-12aee1ab12314b91 --bench`
 `perf record -g `
 
 `perf report -g "graph,0.5,caller"` 
 
 can also try `perf report -g "fractal,0.5,caller"` 
 
+## Flame-graphs for visual perspective
+
+`cargo install --force inferno`
+
+## ToDo
+1. rust inferno flame graphs
+2. perf cache misses etc
+3. Zprint-type-size explore type sizes

@@ -1,12 +1,12 @@
 extern crate core;
 
-use crate::bits::MsbBitIter;
-use crate::codec::encoder::{add_padding, encode_byte_segment};
-use crate::codec::EncodingErr::DataTooLong;
-use crate::codec::{EncodingErr, MaskFN, ZigzagIter, MASK_FN};
+use crate::bits::{BigEndianBitWriter, MsbBitIter};
+use EncodingErr::DataTooLong;
+use crate::codec::{MASK_FN, MaskFN};
 use crate::error_cc::ErrorLevel;
 use std::fs::File;
 use std::io::{Read, Write};
+
 
 pub mod bits;
 pub mod codec;
@@ -62,6 +62,16 @@ impl<const S: usize> Code<S> {
     pub fn code_words(&self) -> &[u8] {
         let num_words = self.err_level.total_words(self.version.0);
         &self.data[0..num_words]
+    }
+
+    pub fn data_module_iter(&self) -> impl Iterator<Item =((u8,u8), bool)> + '_{
+        let version_num = self.version.0;
+        let num_words = self.err_level.total_words(version_num);
+        let code_words = &self.data[0..num_words];
+         let mut bit_iter = MsbBitIter::new(code_words);
+        let mut data_it = Version(version_num).data_region_iter();
+        std::iter::zip(data_it, bit_iter)
+
     }
 
     pub fn module_iter(&self) -> impl Iterator<Item = Module> + '_ {
@@ -518,558 +528,117 @@ fn init_ppm(filename: &str, width: u32, height: u32) -> File {
         .expect("error writing to a file");
     file
 }
-
 #[cfg(test)]
-mod tests {
-    use crate::codec::{QrCode, ZigzagIter};
-    use crate::error_cc::ErrorLevel;
-    use crate::{encode, ConcentricSquare, Module, Version};
-    use std::collections::HashSet;
+mod tests;
 
-    #[test]
-    fn test_concentric_square_iter() {
-        let sq = ConcentricSquare {
-            center: (3, 3),
-            size: 4,
-            color_bits: 0b1011,
+
+#[derive(Debug)]
+pub enum EncodingErr {
+    NotAscii,
+    NotAlphaNumeric,
+    DataTooLong,
+}
+
+
+pub(crate) struct ZigzagIter {
+    next_position: Option<(u8, u8)>,
+    size: u8,
+    traverse_up: bool, //direction
+}
+
+impl ZigzagIter {
+    pub(crate) fn new(size: u8) -> ZigzagIter {
+        return ZigzagIter {
+            next_position: Some((size - 1, size - 1)), //bottom right corner
+            size,
+            traverse_up: true,
         };
-        let set: HashSet<(u8, u8, bool)> = HashSet::from_iter(sq.iter_squares());
-        assert_eq!(set.len(), 49);
-        check_contains_module_square(&set, 7u8, (0, 0), true);
-
-        let sq = ConcentricSquare {
-            center: (17, 3),
-            size: 4,
-            color_bits: 0b1011,
-        };
-        let set: HashSet<(u8, u8, bool)> = HashSet::from_iter(sq.iter_squares());
-        assert_eq!(set.len(), 49);
-
-        check_contains_module_square(&set, 7u8, (14, 0), true);
-        check_contains_module_square(&set, 5u8, (15, 1), false);
-        check_contains_module_square(&set, 3u8, (16, 2), true);
-        check_contains_module_square(&set, 1u8, (17, 3), true);
-
-        let sq = ConcentricSquare {
-            center: (17, 3),
-            size: 3,
-            color_bits: 0b1011,
-        };
-        let set: HashSet<(u8, u8, bool)> = HashSet::from_iter(sq.iter_squares());
-        println!("{:?}", &set);
-        assert_eq!(set.len(), 25);
-
-        check_contains_module_square(&set, 5u8, (15, 1), false);
     }
+}
 
-    fn check_contains_module_square(
-        set: &HashSet<(u8, u8, bool)>,
-        size: u8,
-        top_left: (u8, u8),
-        is_black: bool,
-    ) {
-        let (top_left_x, top_left_y) = top_left;
-        for i in 0..size {
-            assert_eq!(
-                set.contains(&(i + top_left_x, top_left_y, is_black)),
-                true,
-                "does not contain ({},{}, {})",
-                i + top_left_x,
-                top_left_y,
-                is_black
-            );
-            assert_eq!(
-                set.contains(&(i + top_left_x, top_left_y + size - 1, is_black)),
-                true,
-                "does not contain ({},{},{})",
-                i + top_left_x,
-                top_left_y + size - 1,
-                is_black
-            );
-            assert_eq!(
-                set.contains(&(top_left_x, i + top_left_y, is_black)),
-                true,
-                "does not contain ({},{},{})",
-                top_left_x,
-                i + top_left_y,
-                is_black
-            );
-            assert_eq!(
-                set.contains(&(top_left_x + size - 1, i + top_left_y, is_black)),
-                true,
-                "does not contain ({},{},{})",
-                top_left_x + size - 1,
-                i + top_left_y,
-                is_black
-            );
-        }
-    }
+impl Iterator for ZigzagIter {
+    type Item = (u8, u8);
 
-    #[test]
-    fn test_alignment_square() {
-        assert_eq!(Version(1).alignment_squares_iter().count(), 0);
-        let squares: Vec<ConcentricSquare> = Version(2).alignment_squares_iter().collect();
-        assert_eq!(squares.len(), 1);
-        let square = squares.get(0).unwrap();
-
-        let set: HashSet<(u8, u8, bool)> = HashSet::from_iter(square.iter_squares());
-        assert_eq!(true, set.contains(&(17, 17, false)));
-        assert_eq!(true, set.contains(&(16, 16, true)));
-        assert_eq!(false, set.contains(&(15, 15, true)));
-    }
-
-    #[test]
-    fn test_version_reserved_area_iter() {
-        for v_num in 1..=5 {
-            let v = Version(v_num);
-
-            let size = v.square_size();
-            let check_reserved_sq = |top_left, bottom_right| {
-                let (top_left_x, top_left_y) = top_left;
-                let (bottom_right_x, bottom_right_y) = bottom_right;
-                for x in top_left_x..=bottom_right_x {
-                    for y in top_left_y..=bottom_right_y {
-                        assert_eq!(
-                            false,
-                            v.is_data_location((x, y)),
-                            "data module location {},{} version={}",
-                            x,
-                            y,
-                            v_num
-                        );
+    fn next(&mut self) -> Option<Self::Item> {
+        const X_ODD: bool = true;
+        const X_EVEN: bool = false;
+        const UP: bool = true;
+        const DOWN: bool = false;
+        let size = self.size;
+        //key observation is when x is even  next move is left
+        if let Some((x, y)) = self.next_position {
+            let x_odd = (x & 1) != 0;
+            let next_pos = match (x, y, x_odd, self.traverse_up) {
+                (6, _, _, _) => Some((5, 0)), //column with timing pattern line
+                (0..=5, y, X_ODD, _) | (7.., y, X_EVEN, _) => Some((x - 1, y)), //always left
+                (0..=5, 0, X_EVEN, UP) if x > 0 => {
+                    self.traverse_up = false;
+                    Some((x - 1, y))
+                }
+                (0..=5, y, X_EVEN, UP) if y > 0 => Some((x + 1, y - 1)),
+                (0..=5, y, X_EVEN, DOWN) => {
+                    if x == 0 && (y + 1) == size {
+                        None
+                    } else if y + 1 == size {
+                        self.traverse_up = !self.traverse_up;
+                        Some((x - 1, y))
+                    } else {
+                        Some((x + 1, y + 1))
                     }
                 }
+                (7.., 0, X_ODD, UP) => {
+                    self.traverse_up = false;
+                    Some((x - 1, y))
+                }
+                (7.., y, X_ODD, UP) => Some((x + 1, y - 1)),
+                (7.., y, X_ODD, DOWN) => {
+                    if y + 1 < size {
+                        Some((x + 1, y + 1))
+                    } else {
+                        self.traverse_up = !self.traverse_up;
+                        Some((x - 1, y))
+                    }
+                }
+                _ => None,
             };
-
-            check_reserved_sq((0, 0), (8, 8));
-            check_reserved_sq((size - 8, 0), (size - 1, 8));
-            check_reserved_sq((0, size - 8), (8, size - 1));
-            assert_eq!(true, v.is_data_location((size - 9, 0)));
-            assert_eq!(false, v.is_data_location(v.dark_module_location()));
-            assert_eq!(false, v.is_data_location((6, 0)));
-            assert_eq!(false, v.is_data_location((6, 9)));
-
-            if v_num == 2 {
-                //check alignment pattern
-                check_reserved_sq((16, 16), (20, 20));
-                assert_eq!(
-                    true,
-                    v.is_data_location((15, 15)),
-                    "should be data areas (15,15)"
-                );
-                assert_eq!(
-                    true,
-                    v.is_data_location((21, 21)),
-                    "should be data areas (15,15)"
-                );
-            }
-            if v_num == 3 {
-                //check alignment pattern
-                check_reserved_sq((20, 20), (24, 24));
-            }
-            if v_num == 4 {
-                //check alignment pattern
-                check_reserved_sq((24, 24), (28, 28));
-            }
-            if v_num == 5 {
-                //check alignment pattern version 5
-                check_reserved_sq((28, 28), (32, 32));
-            }
+            self.next_position = next_pos;
+            return Some((x, y));
         }
+        None
     }
+}
 
-    #[test]
-    pub fn test_data_region_iter() {
-        const VERSION: u8 = 2;
-        let qr = QrCode::new(VERSION, ErrorLevel::L);
-        let data_modules: Vec<(u8, u8)> = ZigzagIter::new(Version(VERSION).square_size())
-            .filter(|p| qr.is_data_module(*p))
-            .collect();
+const SEG_MODE_BYTES: u8 = 0b0100;
 
-        println!("{:?}", &data_modules);
-        let mods: Vec<(u8, u8)> = Version(VERSION).data_region_iter().collect();
-        let expected_order = &[
-            (24u8, 24u8),
-            (23, 24),
-            (24, 23),
-            (23, 23),
-            (24, 22),
-            (23, 22),
-            (24, 21),
-            (23, 21),
-            (24, 20),
-            (23, 20),
-            (24, 19),
-            (23, 19),
-            (24, 18),
-            (23, 18),
-            (24, 17),
-            (23, 17),
-            (24, 16),
-            (23, 16),
-            (24, 15),
-            (23, 15),
-            (24, 14),
-            (23, 14),
-            (24, 13),
-            (23, 13),
-            (24, 12),
-            (23, 12),
-            (24, 11),
-            (23, 11),
-            (24, 10),
-            (23, 10),
-            (24, 9),
-            (23, 9),
-            (22, 9),
-            (21, 9),
-            (22, 10),
-            (21, 10),
-            (22, 11),
-            (21, 11),
-            (22, 12),
-            (21, 12),
-            (22, 13),
-            (21, 13),
-            (22, 14),
-            (21, 14),
-            (22, 15),
-            (21, 15),
-            (22, 16),
-            (21, 16),
-            (22, 17),
-            (21, 17),
-            (22, 18),
-            (21, 18),
-            (22, 19),
-            (21, 19),
-            (22, 20),
-            (21, 20),
-            (22, 21),
-            (21, 21),
-            (22, 22),
-            (21, 22),
-            (22, 23),
-            (21, 23),
-            (22, 24),
-            (21, 24),
-            (20, 24),
-            (19, 24),
-            (20, 23),
-            (19, 23),
-            (20, 22),
-            (19, 22),
-            (20, 21),
-            (19, 21),
-            (20, 15),
-            (19, 15),
-            (20, 14),
-            (19, 14),
-            (20, 13),
-            (19, 13),
-            (20, 12),
-            (19, 12),
-            (20, 11),
-            (19, 11),
-            (20, 10),
-            (19, 10),
-            (20, 9),
-            (19, 9),
-            (18, 9),
-            (17, 9),
-            (18, 10),
-            (17, 10),
-            (18, 11),
-            (17, 11),
-            (18, 12),
-            (17, 12),
-            (18, 13),
-            (17, 13),
-            (18, 14),
-            (17, 14),
-            (18, 15),
-            (17, 15),
-            (18, 21),
-            (17, 21),
-            (18, 22),
-            (17, 22),
-            (18, 23),
-            (17, 23),
-            (18, 24),
-            (17, 24),
-            (16, 24),
-            (15, 24),
-            (16, 23),
-            (15, 23),
-            (16, 22),
-            (15, 22),
-            (16, 21),
-            (15, 21),
-            (15, 20),
-            (15, 19),
-            (15, 18),
-            (15, 17),
-            (15, 16),
-            (16, 15),
-            (15, 15),
-            (16, 14),
-            (15, 14),
-            (16, 13),
-            (15, 13),
-            (16, 12),
-            (15, 12),
-            (16, 11),
-            (15, 11),
-            (16, 10),
-            (15, 10),
-            (16, 9),
-            (15, 9),
-            (16, 8),
-            (15, 8),
-            (16, 7),
-            (15, 7),
-            (16, 5),
-            (15, 5),
-            (16, 4),
-            (15, 4),
-            (16, 3),
-            (15, 3),
-            (16, 2),
-            (15, 2),
-            (16, 1),
-            (15, 1),
-            (16, 0),
-            (15, 0),
-            (14, 0),
-            (13, 0),
-            (14, 1),
-            (13, 1),
-            (14, 2),
-            (13, 2),
-            (14, 3),
-            (13, 3),
-            (14, 4),
-            (13, 4),
-            (14, 5),
-            (13, 5),
-            (14, 7),
-            (13, 7),
-            (14, 8),
-            (13, 8),
-            (14, 9),
-            (13, 9),
-            (14, 10),
-            (13, 10),
-            (14, 11),
-            (13, 11),
-            (14, 12),
-            (13, 12),
-            (14, 13),
-            (13, 13),
-            (14, 14),
-            (13, 14),
-            (14, 15),
-            (13, 15),
-            (14, 16),
-            (13, 16),
-            (14, 17),
-            (13, 17),
-            (14, 18),
-            (13, 18),
-            (14, 19),
-            (13, 19),
-            (14, 20),
-            (13, 20),
-            (14, 21),
-            (13, 21),
-            (14, 22),
-            (13, 22),
-            (14, 23),
-            (13, 23),
-            (14, 24),
-            (13, 24),
-            (12, 24),
-            (11, 24),
-            (12, 23),
-            (11, 23),
-            (12, 22),
-            (11, 22),
-            (12, 21),
-            (11, 21),
-            (12, 20),
-            (11, 20),
-            (12, 19),
-            (11, 19),
-            (12, 18),
-            (11, 18),
-            (12, 17),
-            (11, 17),
-            (12, 16),
-            (11, 16),
-            (12, 15),
-            (11, 15),
-            (12, 14),
-            (11, 14),
-            (12, 13),
-            (11, 13),
-            (12, 12),
-            (11, 12),
-            (12, 11),
-            (11, 11),
-            (12, 10),
-            (11, 10),
-            (12, 9),
-            (11, 9),
-            (12, 8),
-            (11, 8),
-            (12, 7),
-            (11, 7),
-            (12, 5),
-            (11, 5),
-            (12, 4),
-            (11, 4),
-            (12, 3),
-            (11, 3),
-            (12, 2),
-            (11, 2),
-            (12, 1),
-            (11, 1),
-            (12, 0),
-            (11, 0),
-            (10, 0),
-            (9, 0),
-            (10, 1),
-            (9, 1),
-            (10, 2),
-            (9, 2),
-            (10, 3),
-            (9, 3),
-            (10, 4),
-            (9, 4),
-            (10, 5),
-            (9, 5),
-            (10, 7),
-            (9, 7),
-            (10, 8),
-            (9, 8),
-            (10, 9),
-            (9, 9),
-            (10, 10),
-            (9, 10),
-            (10, 11),
-            (9, 11),
-            (10, 12),
-            (9, 12),
-            (10, 13),
-            (9, 13),
-            (10, 14),
-            (9, 14),
-            (10, 15),
-            (9, 15),
-            (10, 16),
-            (9, 16),
-            (10, 17),
-            (9, 17),
-            (10, 18),
-            (9, 18),
-            (10, 19),
-            (9, 19),
-            (10, 20),
-            (9, 20),
-            (10, 21),
-            (9, 21),
-            (10, 22),
-            (9, 22),
-            (10, 23),
-            (9, 23),
-            (10, 24),
-            (9, 24),
-            (8, 16),
-            (7, 16),
-            (8, 15),
-            (7, 15),
-            (8, 14),
-            (7, 14),
-            (8, 13),
-            (7, 13),
-            (8, 12),
-            (7, 12),
-            (8, 11),
-            (7, 11),
-            (8, 10),
-            (7, 10),
-            (8, 9),
-            (7, 9),
-            (5, 9),
-            (4, 9),
-            (5, 10),
-            (4, 10),
-            (5, 11),
-            (4, 11),
-            (5, 12),
-            (4, 12),
-            (5, 13),
-            (4, 13),
-            (5, 14),
-            (4, 14),
-            (5, 15),
-            (4, 15),
-            (5, 16),
-            (4, 16),
-            (3, 16),
-            (2, 16),
-            (3, 15),
-            (2, 15),
-            (3, 14),
-            (2, 14),
-            (3, 13),
-            (2, 13),
-            (3, 12),
-            (2, 12),
-            (3, 11),
-            (2, 11),
-            (3, 10),
-            (2, 10),
-            (3, 9),
-            (2, 9),
-            (1, 9),
-            (0, 9),
-            (1, 10),
-            (0, 10),
-            (1, 11),
-            (0, 11),
-            (1, 12),
-            (0, 12),
-            (1, 13),
-            (0, 13),
-            (1, 14),
-            (0, 14),
-            (1, 15),
-            (0, 15),
-            (1, 16),
-            (0, 16),
-        ];
-        assert_eq!(&mods, &expected_order);
+// encode string to data code words
+//include mode type and padding bits
+pub fn encode_byte_segment(data: &str, out: &mut [u8]) -> Result<usize, EncodingErr> {
+    let char_count = data.chars().count();
+    if char_count > out.len() {
+        return Err(DataTooLong);
     }
-
-    #[test]
-    pub fn test_encode() {
-        let code = encode::<128>("isaiah-perumalla").unwrap();
-
-        //ErrorLevel::L
-        let expected_words = [
-            65, 6, 151, 54, 22, 150, 22, 130, 215, 6, 87, 39, 86, 214, 22, 198, 198, 16, 236, 121,
-            93, 100, 23, 7, 230, 143,
-        ];
-        assert_eq!(&expected_words, code.code_words());
+    let mut bit_writer = BigEndianBitWriter::new(out);
+    //bytes
+    bit_writer.append_bits(SEG_MODE_BYTES, 4);
+    bit_writer.append_bits(char_count as u8, 8);
+    for ch in data.chars() {
+        let byte = ch as u8;
+        bit_writer.append_bits(byte, 8);
     }
+    bit_writer.append_bits(0b0000, 4); // terminator bits
 
-    #[test]
-    pub fn test_version_format_modules() {
-        let v = Version(1);
-        let modules = v.format_modules(ErrorLevel::L, 0);
-        assert_eq!(true, modules.iter().all(|m| !m.is_data()));
+    let pad_bits = bit_writer.bits_written() % 8;
+    bit_writer.append_bits(0, pad_bits as u8);
 
-        println!("{:?}", &modules);
+    let bytes = bit_writer.bits_written() >> 3; //bits/8
+    debug_assert!(bytes == 2 + char_count);
+    return Ok(bytes);
+}
+
+pub fn add_padding(bytes: &mut [u8]) {
+    const PAD_BYTES: [u8; 2] = [0xEC, 0x11];
+    for i in 0..bytes.len() {
+        let b = PAD_BYTES[(i & 1)]; //cycle between odd and even
+        bytes[i] = b;
     }
 }

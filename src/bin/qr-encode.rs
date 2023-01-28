@@ -1,25 +1,16 @@
 use tiny_qr::bits::BitSquare;
-use tiny_qr::codec::{EncodingErr, QrCode};
 use tiny_qr::error_cc::ErrorLevel;
-use tiny_qr::{
-    codec, Canvas, Code, Module, Version, BLACK, GREEN, GREY, ORANGE, RED, RGB, WHITE, YELLOW,
-};
+use tiny_qr::{BLACK, Canvas, Code, codec, EncodingErr, GREEN, GREY, Module, ORANGE, RED, RGB, Version, WHITE, YELLOW};
 
 const PIXEL_PER_MOD: u32 = 16;
 const QUITE_ZONE_SIZE: u32 = 2;
 const VERSION: u8 = 5;
 
 fn main() {
-    let module_sq_size: u32 = codec::version_to_size(VERSION) as u32;
 
-    let mut qr = QrCode::new(VERSION, ErrorLevel::L);
-    ppm_img(module_sq_size, qr.data_sq(), "qr-no-data");
     let data = "Unless the Lord builds the house,
     the builders labor in vain. Psalm-127 www.biblegateway.com/passage";
-    qr.encode_data(data);
 
-    ppm_img(module_sq_size, qr.data_sq(), "qr-test");
-    ppm_img(module_sq_size, qr.reserved_area(), "qr-test-reserved");
 
     let result = tiny_qr::encode::<144>(data);
     if let Ok(code) = result {
@@ -80,9 +71,9 @@ fn module_to_color(m: Module) -> RGB {
 #[cfg(test)]
 mod tests {
     use crate::module_to_color;
-    use tiny_qr::{Canvas, Version, BLACK, GREEN, ORANGE, RED, RGB, WHITE, YELLOW};
+    use tiny_qr::{BLACK, Canvas, GREEN, ORANGE, RED, RGB, Version, WHITE, YELLOW};
 
-    #[test] //visual test to see mandatory/reserved areas are rendered
+    #[test] //visual lib to see mandatory/reserved areas are rendered
     fn test_reserved_area() {
         for i in 1..=5 {
             let version = Version(i);
