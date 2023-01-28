@@ -22,6 +22,9 @@ if you dont have Rust nightly build use the following to install
 To run the benchmarks run the following
 `cargo +nightly bench --bench benchmark`
 
+To run a specific bench, pass the args as below. it will run only benchmark begining with "bench_code"
+`cargo +nightly bench -- bench_code`
+
 ## Profiling 
 Profiler need frame pointer to workout the call graph, on x86 this is by conventions store in ebp register, which indicates the starting address of the function’s stack frame
 in release build the Rust omits storing the frame pointer, this causes issue for profiles when working out the call stack
@@ -35,9 +38,18 @@ Build the benchmark executable using command below
 Run `perf stat target/release/deps/benchmarks-xxx --bench`
 this should provide an overall picture of how the program performs 
 
+`perf record -g -e L1-dcache-loads,L1-dcache-load-misses ./target/release/deps/benchmarks-12aee1ab12314b91 --bench`
 `perf record -g `
 
 `perf report -g "graph,0.5,caller"` 
 
 can also try `perf report -g "fractal,0.5,caller"` 
 
+## Flame-graphs for visual perspective
+
+`cargo install --force inferno`
+
+## ToDo
+1. rust inferno flame graphs
+2. perf cache misses etc
+3. Zprint-type-size explore type sizes

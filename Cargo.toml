@@ -1,5 +1,5 @@
 [package]
-name = "tiny_qr"
+name = "microQRs"
 version = "0.1.0"
 edition = "2021"
 

@@ -3,7 +3,8 @@ mod bench {
     extern crate test;
 
     use test::Bencher;
-    use tiny_qr::gf256::{gen_polynomial, Poly};
+    use microQRs::error_cc::ErrorLevel;
+    use microQRs::gf256::{gen_polynomial, Poly};
 
     const SAMPLE_DATA: [u8; 108] = [
         69, 21, 71, 39, 87, 55, 66, 6, 150, 226, 7, 70, 134, 82, 4, 196, 245, 36, 66, 7, 118, 151,
@@ -13,6 +14,7 @@ mod bench {
         17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17, 236,
         17, 236,
     ];
+
     #[bench]
     fn bench_error_codes(b: &mut Bencher) {
         // let inv = tiny_qr::error_correction::gf256::get_inverse(2);
@@ -24,6 +26,19 @@ mod bench {
 
             let remainder = data.div_remainder(gen_poly);
             test::black_box(remainder);
+        });
+    }
+
+    #[bench]
+    fn bench_code_bytes_to_qrcode_v5(b: &mut Bencher) {
+        let data_str =  "Unless the Lord builds the house,the builders labor in vain. Psalm-127 www.biblegateway.com/passage";
+        b.iter(|| {
+            let result = test::black_box(microQRs::encode::<144>(data_str));
+            if let Ok(code) = result {
+                test::black_box(&code);
+            } else {
+                panic!("err on encode");
+            }
         });
     }
 }

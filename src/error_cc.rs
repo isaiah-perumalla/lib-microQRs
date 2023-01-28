@@ -128,6 +128,10 @@ impl ErrorLevel {
                 let mut ecc_words = [0u8; 32];
                 let ecc_size =
                     ErrorLevel::L.compute_ecc(version, &msg_buffer[0..data_size], &mut ecc_words);
+                debug_assert!(
+                    data_size + ecc_size < msg_buffer.len(),
+                    "msg_buffer#len not big enough"
+                );
                 let ecc_blk = &ecc_words[0..ecc_size];
                 debug_assert!(
                     ecc_size == capacity_info.ec_words_per_blk as usize,
@@ -138,7 +142,7 @@ impl ErrorLevel {
                 }
                 (data_size + ecc_blk.len()) as usize
             }
-            _ => todo!(),
+            _ => todo!("only ErrorLevel L implemented"),
         }
     }
 
