@@ -1,21 +1,20 @@
-# ref: https://docs.codecov.com/docs/codecovyml-reference
-coverage:
-  # Hold ourselves to a high bar
-  range: 85..100
-  round: down
-  precision: 1
-  status:
-    # ref: https://docs.codecov.com/docs/commit-status
-    project:
-      default:
-        # Avoid false negatives
-        threshold: 1%
-
-# Test files aren't important for coverage
-ignore:
-  - "tests"
-
-# Make comments less noisy
-comment:
-  layout: "files"
-  require_changes: yes
+on:
+  push:
+    branches: [main]
+  pull_request:
+name: coverage
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: xd009642/tarpaulin:develop-nightly
+      options: --security-opt seccomp=unconfined
+    steps:
+      - uses: actions/checkout@v2
+      - name: Generate code coverage
+        run: |
+          cargo +nightly tarpaulin --verbose --all-features --workspace --timeout 120 --run-types Doctests --run-types Tests --out Xml
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v2
+        with:
+          fail_ci_if_error: true
