@@ -1,5 +1,7 @@
 ![Build](https://github.com/isaiah-perumalla/qrs/actions/workflows/rust.yml/badge.svg)
-[![codecov](https://codecov.io/gh/isaiah-perumalla/lib-microQRs/branch/main/graph/badge.svg?token=H1K7VAIPXT)](https://codecov.io/gh/isaiah-perumalla/lib-microQRs)## Usage / Example
+[![codecov](https://codecov.io/gh/isaiah-perumalla/lib-microQRs/branch/main/graph/badge.svg?token=H1K7VAIPXT)](https://codecov.io/gh/isaiah-perumalla/lib-microQRs)
+
+## Usage / Example
 
 ## Motivation
 goal of this project is to build something I find interesting using Rust
