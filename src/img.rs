@@ -66,7 +66,6 @@ impl Canvas {
         writer
             .write_all(format!("P6 {} {} 255 ", self.width, self.height).as_bytes())
             .expect("error writing header");
-
     }
     pub fn write(&mut self, w: &mut impl Write) {
         let bytes = &serialize_rgb(&self.pixels, (self.width * self.height) as usize);
@@ -95,7 +94,7 @@ impl Canvas {
         Canvas::new(
             canvas_size,
             canvas_size,
-            GREY,
+            WHITE,
             Self::DEFAULT_QUITE_ZONE_SIZE,
             Self::PIXEL_PER_MOD,
         )

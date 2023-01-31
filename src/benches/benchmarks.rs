@@ -2,9 +2,9 @@
 mod bench {
     extern crate test;
 
-    use test::Bencher;
     use microQRs::error_cc::ErrorLevel;
     use microQRs::gf256::{gen_polynomial, Poly};
+    use test::Bencher;
 
     const SAMPLE_DATA: [u8; 108] = [
         69, 21, 71, 39, 87, 55, 66, 6, 150, 226, 7, 70, 134, 82, 4, 196, 245, 36, 66, 7, 118, 151,
