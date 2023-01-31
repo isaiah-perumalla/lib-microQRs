@@ -1,17 +1,32 @@
 ![Build](https://github.com/isaiah-perumalla/qrs/actions/workflows/rust.yml/badge.svg)
 [![codecov](https://codecov.io/gh/isaiah-perumalla/lib-microQRs/branch/main/graph/badge.svg?token=H1K7VAIPXT)](https://codecov.io/gh/isaiah-perumalla/lib-microQRs)
 
-## Usage / Example
+## Example 
+```shell
+cargo run --example txt2qr "lib-µQRs is tiny efficient Rust library to encode to QR code" > qr.ppm
 
+```
+generates the image in ppm format 
+![qr-img](./assets/qrs.png)
+
+## Usage
+```rust
+let result = microQRs::encode::<144>("lib-µQRs is tiny efficient Rust library to encode to QR code");
+        if let Ok(code) = result {
+            microQRs::img::ppm::to_img(&code, [WHITE, BLACK], &mut stdout());
+        } else {
+            eprintln!("encode err ");
+        }
+```
 ## Motivation
 goal of this project is to build something I find interesting using Rust
 Recently been curious how QR codes work, in particular the Error Correction using finite fields seemed interesting for me ,
 Rust is touted as being **blazingly fast and memory-efficient**, as with any programming language, I decided to build something I find interesting, and in the 
 process I hope to learn tools the language provides control like memory management strategies and fine turne performance where needed. 
-I have following goals 
+I have the following goals 
 1. No 3rd Party libs everything is written from scratch using **only** the stdlib
 2. minimize heap usage, take advantage of low-level control offered by rust and stack alloc where possible
-3. learn about galios finite fields, implement everything from ground up
+3. learn about Galios Finite Fields, implement everything from ground up
 4. learn how to benchmark Rust code and analyse performance
 
 

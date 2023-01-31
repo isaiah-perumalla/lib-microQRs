@@ -1,6 +1,6 @@
+use microQRs::img::{BLACK, WHITE};
 use std::env;
 use std::io::stdout;
-use microQRs::img::{BLACK, WHITE};
 
 ///
 /// simple usage for qr library
