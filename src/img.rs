@@ -28,7 +28,7 @@ pub mod ppm {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct RGB(u8, u8, u8);
+pub struct RGB(pub u8, pub u8, pub u8);
 
 fn serialize_rgb(pixels: &Vec<RGB>, size: usize) -> Vec<u8> {
     let mut output: Vec<u8> = Vec::with_capacity(size * 3);
@@ -62,7 +62,13 @@ impl Canvas {
         self.write(&mut file);
     }
 
-    fn write(&mut self, w: &mut impl Write) {
+    pub fn write_header(&self, writer: &mut impl Write) {
+        writer
+            .write_all(format!("P6 {} {} 255 ", self.width, self.height).as_bytes())
+            .expect("error writing header");
+
+    }
+    pub fn write(&mut self, w: &mut impl Write) {
         let bytes = &serialize_rgb(&self.pixels, (self.width * self.height) as usize);
         w.write_all(bytes).expect("error");
     }
